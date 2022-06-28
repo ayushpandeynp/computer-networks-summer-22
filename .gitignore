@@ -1,3 +1,5 @@
 test.c
 .vscode
 **/.DS_Store
+client
+server

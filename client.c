@@ -11,8 +11,10 @@
 #define PORT 9007  // Control Channel PORT
 #define CPORT 8080 // Data Channel PORT - should be random later
 
-char buf[1023]; // buffer for receiving data - should be random later
+char buf[1023]; // buffer for receiving data - should make sense later
+
 bool running = true;
+bool dataTransferRunning = false;
 
 int dataconn()
 {
@@ -77,120 +79,130 @@ int dataconn()
 void handleCommands(char buffer[], int cSocket)
 {
 	int login_state = -1;
-	char command[5];
-	strncpy(command, buffer + 0, 4);
+	char command[6];
+	strncpy(command, buffer + 0, 5);
 
-	// QUIT Control Command Handling
-	if (strstr(buffer, "QUIT"))
+	// Client Machine Commands
+	if (strstr(command, "QUIT"))
 	{
 		printf("221 Service closing control connection. \n");
 		// close(*cSocket);
 		running = false;
-		return;
 	}
-
-	send(cSocket, buffer, strlen(buffer), 0);
-	bzero(buffer, sizeof(buffer));
-	recv(cSocket, buffer, sizeof(buffer), 0);
-
-	// printing message from server
-	printf("%s\n", buffer);
-
-	char statusCode[4];
-	strncpy(statusCode, buffer + 0, 3);
-
-	if (login_state == -1)
+	else if (strstr(command, "!CWD"))
 	{
-		if (strstr(command, "USER") && statusCode == "331")
-		{
-			login_state++;
-		}
-		else if (login_state == 0 && strstr(command, "PASS") && statusCode == "230")
-		{
-			login_state++;
-		}
-		else
-		{
-			// printf("%s \n", buffer);
-			// char cwd[500];
-			// if (getcwd(cwd, sizeof(cwd)) != NULL)
-			// {
-			// 	printf("Current working dir: %s\n", cwd);
-			// }
-			// if (strstr(buffer, "STOR") != NULL)
-			// {
-			// 	send(cSocket, buffer, strlen(buffer), 0);
-			// 	int datafd = dataconn();
-
-			// 	char *filename = buffer + 5;
-			// 	// printf("FN: %s\n",filename);
-
-			// 	FILE *fp;
-			// 	fp = fopen(filename, "rb");
-			// 	// char *temp, *filename = buffer+5;
-
-			// 	if (fp == NULL)
-			// 	{
-			// 		printf("can't open %s\n", filename);
-			// 	}
-			// 	printf("Sending STOR Request for %s.\n", filename);
-			// 	write(cSocket, buf, sizeof(buf));
-			// 	struct stat stat_buf;
-			// 	int rc = stat(filename, &stat_buf);
-			// 	int fsize = stat_buf.st_size;
-			// 	printf("%s size is %d bytes.\n", filename, fsize);
-			// 	char *databuff[fsize + 1];
-			// 	fread(databuff, 1, sizeof(databuff), fp);
-			// 	int total = 0, bytesleft = fsize, ln;
-			// 	printf("Sending %s......\n", filename);
-
-			// 	while (total < fsize)
-			// 	{
-			// 		printf("%ld \n", sizeof(databuff));
-			// 		ln = send(datafd, databuff + total, bytesleft, 0);
-			// 		printf("%ld \n", sizeof(ln));
-			// 		if (ln == -1)
-			// 			break;
-			// 		total += ln;
-			// 		bytesleft -= ln;
-			// 	}
-			// 	printf("Total data sent for %s = %d bytes.\n", filename, total);
-			// 	bzero(databuff, sizeof(databuff));
-			// 	fclose(fp);
-
-			// 	bzero(buffer, sizeof(buffer));
-			// }
-
-			// if (strstr(buffer, "RETR") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "LIST") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "CWD") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "PWD") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "!CWD") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "!PWD") == 0)
-			// {
-			// }
-
-			// if (strstr(buffer, "!LIST") == 0)
-			// {
-			// }
-		}
+		printf("CWD COMMAND ON MACHINE\n");
+	}
+	else if (strstr(command, "!PWD"))
+	{
+		printf("PWD COMMAND ON MACHINE\n");
+	}
+	else if (strstr(command, "!LIST"))
+	{
+		printf("LIST COMMAND ON MACHINE\n");
 	}
 
+	// DATA channel Commands
+	else if (strstr(command, "LIST"))
+	{
+		printf("DATA CHANNEL: LIST");
+	}
+	else if (strstr(command, "RETR"))
+	{
+		printf("DATA CHANNEL: RETR");
+	}
+	else if (strstr(command, "STOR"))
+	{
+		printf("DATA CHANNEL: STOR");
+	}
+
+	// Control Channel Commands
+	else
+	{
+		// send command to server
+		send(cSocket, buffer, strlen(buffer), 0);
+		bzero(buffer, sizeof(buffer));
+		recv(cSocket, buffer, sizeof(buffer), 0);
+
+		// printing message from server
+		printf("%s\n", buffer);
+
+		char statusCode[4];
+		strncpy(statusCode, buffer + 0, 3);
+
+		if (login_state == -1)
+		{
+			if (strstr(command, "USER") && statusCode == "331")
+			{
+				login_state++;
+			}
+			else if (login_state == 0 && strstr(command, "PASS") && statusCode == "230")
+			{
+				login_state++;
+			}
+			else if (login_state == 1) // NOW USER IS LOGGED IN
+			{
+				if (strstr(command, "CWD") && statusCode == "200")
+				{
+					printf("SERVER RESPONSE FOR CWD:\n%s", buffer);
+				}
+				else if (strstr(command, "PWD" && statusCode == "257"))
+				{
+					printf("SERVER RESPONSE FOR PWD:\n%s", buffer);
+				}
+
+				// TO-DO:
+				// char cwd[500];
+				// if (getcwd(cwd, sizeof(cwd)) != NULL)
+				// {
+				// 	printf("Current working dir: %s\n", cwd);
+				// }
+				// if (strstr(buffer, "STOR") != NULL)
+				// {
+				// 	send(cSocket, buffer, strlen(buffer), 0);
+				// 	int datafd = dataconn();
+
+				// 	char *filename = buffer + 5;
+				// 	// printf("FN: %s\n",filename);
+
+				// 	FILE *fp;
+				// 	fp = fopen(filename, "rb");
+				// 	// char *temp, *filename = buffer+5;
+
+				// 	if (fp == NULL)
+				// 	{
+				// 		printf("can't open %s\n", filename);
+				// 	}
+				// 	printf("Sending STOR Request for %s.\n", filename);
+				// 	write(cSocket, buf, sizeof(buf));
+				// 	struct stat stat_buf;
+				// 	int rc = stat(filename, &stat_buf);
+				// 	int fsize = stat_buf.st_size;
+				// 	printf("%s size is %d bytes.\n", filename, fsize);
+				// 	char *databuff[fsize + 1];
+				// 	fread(databuff, 1, sizeof(databuff), fp);
+				// 	int total = 0, bytesleft = fsize, ln;
+				// 	printf("Sending %s......\n", filename);
+
+				// 	while (total < fsize)
+				// 	{
+				// 		printf("%ld \n", sizeof(databuff));
+				// 		ln = send(datafd, databuff + total, bytesleft, 0);
+				// 		printf("%ld \n", sizeof(ln));
+				// 		if (ln == -1)
+				// 			break;
+				// 		total += ln;
+				// 		bytesleft -= ln;
+				// 	}
+				// 	printf("Total data sent for %s = %d bytes.\n", filename, total);
+				// 	bzero(databuff, sizeof(databuff));
+				// 	fclose(fp);
+
+				// 	bzero(buffer, sizeof(buffer));
+				// }
+			}
+		}
+	}
 	bzero(buffer, sizeof(buffer));
 }
 
@@ -208,8 +220,8 @@ int controlSocket()
 	}
 
 	// setsock
-	int value = 1;														  // scope is closed only until next line
-	setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value)); //&(int){1},sizeof(int)
+	int value = 1; // scope is closed only until next line
+	setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
 	struct sockaddr_in server_address;
 	bzero(&server_address, sizeof(server_address));
@@ -226,7 +238,7 @@ int controlSocket()
 	// check for errors with the connection
 	if (connection_status == -1)
 	{
-		printf("There was an error making a connection to the remote socket \n\n");
+		printf("There was an error making a connection to the remote socket. \n\n");
 		exit(EXIT_FAILURE);
 	}
 
@@ -241,12 +253,12 @@ int main()
 	while (running)
 	{
 		// take command input
-		printf("FTP-> ");
+		printf("ftp> ");
 		fgets(buffer, sizeof(buffer), stdin);
 
-		// remove trailing newline char from buffer, fgets does not remove it
-		// buffer[strcspn(buffer, "\n")] = 0; // review 0 or '0'
-		// send(cSocket, buffer, strlen(buffer), 0);
+		// remove trailing newline char from buffer, fgets doesn't do it
+		buffer[strcspn(buffer, "\n")] = 0; // review 0 or '0'
+
 		handleCommands(buffer, cSocket);
 	}
 
