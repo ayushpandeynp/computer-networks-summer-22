@@ -103,19 +103,18 @@ void handleCommands(char buffer[], int cSocket)
 	}
 
 	// DATA channel Commands
-	else if (strstr(command, "LIST"))
+	else if (login_state == 1 && strstr(command, "LIST"))
 	{
 		printf("DATA CHANNEL: LIST");
 	}
-	else if (strstr(command, "RETR"))
+	else if (login_state == 1 && strstr(command, "RETR"))
 	{
 		printf("DATA CHANNEL: RETR");
 	}
-	else if (strstr(command, "STOR"))
+	else if (login_state == 1 && strstr(command, "STOR"))
 	{
 		printf("DATA CHANNEL: STOR");
 	}
-
 	// Control Channel Commands
 	else
 	{
@@ -140,7 +139,7 @@ void handleCommands(char buffer[], int cSocket)
 			{
 				login_state++;
 			}
-			else if (login_state == 1) // NOW USER IS LOGGED IN
+			else if (login_state == 1) // USER IS LOGGED IN
 			{
 				if (strstr(command, "CWD") && statusCode == "200")
 				{
