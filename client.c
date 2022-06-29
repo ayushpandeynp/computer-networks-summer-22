@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <dirent.h>
 
 #define S_PORT 9007 // Control Channel PORT
 #define C_PORT 8080 // Data Channel PORT - should be random later
@@ -14,69 +15,85 @@
 char buf[1023]; // buffer for receiving data - should make sense later
 
 bool running = true;
-bool dataTransferRunning = false;
+int login_state = -1;
 
-int listenOnDataChannel()
+void portCommand()
 {
+	// todo: send port data to server on control channel
+}
+int createSocket(bool lstn, int port)
+{
+	// create a socket - Control Channel Socket
 	int cSocket;
 	cSocket = socket(AF_INET, SOCK_STREAM, 0);
 
-	// check for fail error
+	// check for fail error - for control
 	if (cSocket == -1)
 	{
-		printf("Data channel creation has failed. \n");
+		printf("socket creation failed..\n");
 		exit(EXIT_FAILURE);
 	}
 
 	// setsock
-	int value = 1;
-	// Reuse port after Service ends
-	setsockopt(cln_socket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
+	int value = 1; // scope is closed only until next line
+	setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
-	// define client address structure
-	struct sockaddr_in cln_address;
-	bzero(&cln_address, sizeof(cln_address));
-	cln_address.sin_family = AF_INET;
-	cln_address.sin_port = htons(C_PORT);
-	cln_address.sin_addr.s_addr = INADDR_ANY;
+	struct sockaddr_in addr;
+	bzero(&addr, sizeof(addr));
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	addr.sin_addr.s_addr = INADDR_ANY;
 
-	// FOR Server connections later in the code
-	// Server socket address structures
-	struct sockaddr_in svc_address;
-
-	// Stores byte size of server socket address
-	socklen_t addr_size;
-
-	// bind the socket to our specified IP and port
-	if (bind(cln_socket,
-			 (struct sockaddr *)&cln_address,
-			 sizeof(cln_address)) < 0)
+	if (!lstn)
 	{
-		printf("socket bind failed..\n");
-		exit(EXIT_FAILURE);
+		// connect
+		int connection_status =
+			connect(cSocket,
+					(struct sockaddr *)&addr,
+					sizeof(addr));
+
+		// check for errors with the connection
+		if (connection_status == -1)
+		{
+			printf("There was an error making a connection to the remote socket. \n\n");
+			exit(EXIT_FAILURE);
+		}
+	}
+	else
+	{
+		// bind the socket to our specified IP and port
+		if (bind(cSocket,
+				 (struct sockaddr *)&addr,
+				 sizeof(addr)) < 0)
+		{
+			printf("socket bind failed..\n");
+			exit(EXIT_FAILURE);
+		}
+
+		// after it is bound, we can listen for connections with queue length of 5
+		if (listen(cSocket, 5) < 0)
+		{
+			printf("Listen failed..\n");
+			close(cSocket);
+			exit(EXIT_FAILURE);
+		}
+
+		printf("Client has started and is listening on PORT [%d]\n", C_PORT);
+
+		// FOR Server connections later in the code
+		// Server socket address structures
+		struct sockaddr_in svc_address;
+		socklen_t addr_size = sizeof(svc_address);
+		int dataSocket = accept(
+			cSocket, (struct sockaddr *)&addr,
+			&addr_size);
 	}
 
-	// after it is bound, we can listen for connections with queue length of 5
-	if (listen(cln_socket, 5) < 0)
-	{
-		printf("Listen failed..\n");
-		close(cln_socket);
-		exit(EXIT_FAILURE);
-	}
-
-	printf("Client has started and is listening on PORT [%d]\n", C_PORT);
-
-	addr_size = sizeof(svc_address);
-	int dataSocket = accept(
-		cln_socket, (struct sockaddr *)&cln_address,
-		&addr_size);
-
-	return dataSocket;
+	return cSocket;
 }
 
 void handleCommands(char buffer[], int cSocket)
 {
-	int login_state = -1;
 	char command[6];
 	strncpy(command, buffer + 0, 5);
 
@@ -89,15 +106,42 @@ void handleCommands(char buffer[], int cSocket)
 	}
 	else if (strstr(command, "!CWD"))
 	{
-		printf("CWD COMMAND ON MACHINE\n");
+		char ch_dir[64];
+		strncpy(ch_dir, buffer + 5, sizeof(buffer));
+		printf("Directory changed to: %s \n", ch_dir);
+		if (chdir(ch_dir) != 0)
+		{
+			perror("[Error]: No such directory exists.");
+		}
 	}
 	else if (strstr(command, "!PWD"))
 	{
-		printf("PWD COMMAND ON MACHINE\n");
+		char cwd[64];
+		if (getcwd(cwd, sizeof(cwd)) != NULL)
+		{
+			printf("Current working dir: %s\n", cwd);
+		}
 	}
 	else if (strstr(command, "!LIST"))
 	{
-		printf("LIST COMMAND ON MACHINE\n");
+		int count = 0;
+		struct dirent *dir;
+
+		DIR *d;
+		d = opendir(".");
+		if (d)
+		{
+			while ((dir = readdir(d)) != NULL)
+			{
+				if (count > 1)
+				{
+					char type = dir->d_type == 4 ? 'D' : 'F';
+					printf("%c\t\t%s\n", type, dir->d_name);
+				}
+				count++;
+			}
+			closedir(d);
+		}
 	}
 	// Control Channel Commands
 	else
@@ -183,61 +227,26 @@ void handleCommands(char buffer[], int cSocket)
 			else if (strstr(command, "LIST") && statusCode == "150")
 			{
 				printf("DATA CHANNEL: LIST");
+				int channel = createSocket(true, C_PORT);
 			}
 			else if (strstr(command, "RETR") && statusCode == "150")
 			{
 				printf("DATA CHANNEL: RETR");
+				int channel = createSocket(true, C_PORT);
 			}
 			else if (strstr(command, "STOR") && statusCode == "150")
 			{
 				printf("DATA CHANNEL: STOR");
+				int channel = createSocket(false, C_PORT);
 			}
 		}
 	}
 	bzero(buffer, sizeof(buffer));
 }
 
-int controlSocket()
-{
-	// create a socket - Control Channel Socket
-	int cSocket;
-	cSocket = socket(AF_INET, SOCK_STREAM, 0);
-
-	// check for fail error - for control
-	if (cSocket == -1)
-	{
-		printf("socket creation failed..\n");
-		exit(EXIT_FAILURE);
-	}
-
-	// setsock
-	int value = 1; // scope is closed only until next line
-	setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
-
-	struct sockaddr_in server_address;
-	bzero(&server_address, sizeof(server_address));
-	server_address.sin_family = AF_INET;
-	server_address.sin_port = htons(S_PORT);
-	server_address.sin_addr.s_addr = INADDR_ANY;
-
-	// connect
-	int connection_status =
-		connect(cSocket,
-				(struct sockaddr *)&server_address,
-				sizeof(server_address));
-
-	// check for errors with the connection
-	if (connection_status == -1)
-	{
-		printf("There was an error making a connection to the remote socket. \n\n");
-		exit(EXIT_FAILURE);
-	}
-
-	return cSocket;
-}
 int main()
 {
-	int cSocket = controlSocket();
+	int cSocket = createSocket(false, S_PORT);
 
 	// accept command
 	char buffer[256];
