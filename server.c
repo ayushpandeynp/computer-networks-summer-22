@@ -7,12 +7,15 @@
 #include <stdlib.h>
 #include <sys/time.h>
 #include <sys/select.h>
+#include <stdlib.h>
+#include <stdbool.h>
+#include <dirent.h> 
 
 #define PORT 9007
 #define CPORT 8080
 #define MAX 64
-int dataFd, clientCntlPort;
-char *clientCntlAddr;
+
+int arr_size;
 char buf[MAX];
 
 // Object to load login details
@@ -115,7 +118,129 @@ int tempconnect()
 
 	return network_socket;
 }
+//-----------------------------------------------------------------------------------------------------------------
+void handleCommands(int fd, char buffer[], int* login_state){
+	
+	printf("INITIAL: %d\n",*login_state);
+	//char buffer[256]; buffer = buff;
+	char command[6]; char check_username[256];
+	bzero(command, sizeof(command));
+	strncpy(command, buffer + 0, 5);
 
+	char stsCode1[] = "530 Not logged in";
+	char stsCode2[] = "331 Username OK, need password";
+	char stsCode3[] = "230 User logged in, please proceed ...";
+	char stsCode4[] = "503 Bad sequence of commands";
+	char stsCode5[] = "202 Command not implemented";
+	char stsCode6[] = "257 ";
+
+	//Control Channel Commands after User Authentication
+	if (strstr(command, "CWD") != NULL && (*login_state == 1))
+	{
+		chdir("server_dir");
+		char ch_dir[500]; strncpy(ch_dir, buffer + 5, sizeof(buffer));
+		printf("dir: %s \n", ch_dir);
+		if(chdir(ch_dir) != 0){
+			perror("No such directory");
+		}
+	}
+	else if (strstr(command, "PWD") != NULL && (*login_state == 1))
+	{
+		chdir("server_dir");
+		char cwd[500];
+    	if (getcwd(cwd, sizeof(cwd)) != NULL) {
+    		strcat(stsCode6, cwd);
+    		printf("%s\n",stsCode6);
+       		send(fd, stsCode6, sizeof(stsCode6), 0);
+   		}
+	}
+
+	//Data Channel Commands after User Authentication
+	else if (strstr(command, "STOR") != NULL && (*login_state == 1))
+	{
+		int cln_conn = tempconnect();
+		char *name = command + 16;
+		printf("Received PUT request for %s.\n", name);
+		FILE *fp;
+		fp = fopen(name, "wb");
+		char *buff[MAX];
+		bzero(buf, MAX);
+		int total = 0, ln;
+		while ((ln = read(cln_conn, buf, MAX)) > 0)
+		{
+			fwrite(buf, 1, sizeof(buf), fp);
+			total += ln;
+			if (ln < MAX)
+				break;
+		}
+		printf("Bytes of data received for %s = %d.\n", name, total);
+		fclose(fp);
+	}
+	else if(strstr(command, "RETR") != NULL && (*login_state == 1))
+	{
+
+	}
+	else if(strstr(command, "LIST") != NULL && (*login_state == 1))
+	{
+
+	}
+
+	//USER Authentication
+	else{
+		
+		if (strstr(command, "USER"))
+		{
+			char *username = buffer + 5;
+			printf("%s\n",username);
+			printf("HERE: %d\n",*login_state );
+			for (int i = 0; i < arr_size - 1; i++)
+			{
+				if (strcmp(username, data[i].user) == 0)
+				{
+					printf("TRUEEEE\n");
+					(*login_state)++;
+					send(fd, stsCode2, sizeof(stsCode2), 0);
+					bzero(check_username, sizeof(check_username));
+					memcpy(check_username, username, strlen(username));
+					break;
+				}
+			}
+
+			printf("logn: %d\n",*login_state );
+			if (*login_state == -1)
+			{
+				send(fd, stsCode1, sizeof(stsCode1), 0);
+			}
+		}
+		else if (strstr(command, "PASS") != NULL)
+		{
+			char *password = buffer + 5;
+			if(((*login_state) == 0)){
+				for (int i = 0; i < arr_size - 1; i++)
+				{
+					if (strcmp(password, data[i].pass) == 0 && strcmp(check_username, data[i].user)==0)
+					{
+						printf("MATCH\n");
+						(*login_state)++;
+						send(fd, stsCode3, sizeof(stsCode3), 0);
+						break;
+					}
+				}if(*login_state == 0){*login_state--; send(fd, stsCode1, sizeof(stsCode1), 0);}
+			}else if(*login_state == -1){
+				send(fd, stsCode1, sizeof(stsCode1), 0);
+			}else{
+				printf("%d\n",*login_state);
+				send(fd, stsCode4, sizeof(stsCode4), 0);
+			}
+		}
+		else
+		{
+			send(fd, stsCode5, sizeof(stsCode5), 0); 
+		}
+	}
+}
+
+//-----------------------------------------------------------------------------------------------------------------------
 int main()
 {
 	int server_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -167,12 +292,9 @@ int main()
 	printf("Server is listening...\n");
 
 	// Flags
-	char flag[] = "TRUE";
-	char flag_1[] = "FALSE";
-	int login = 0;
 
 	char *filename = "users.txt";
-	int arr_size = load(filename);
+	arr_size = load(filename);
 
 	// Temporary Function to print users
 	for (int i = 0; i < arr_size - 1; i++)
@@ -180,6 +302,7 @@ int main()
 		printf("%d %s : %s \n", i, data[i].user, data[i].pass);
 	}
 
+	int login_state = -1;
 	while (1)
 	{
 		// notice so far, we have created 2 fd_sets : all_sockets , ready_sockets
@@ -236,9 +359,11 @@ int main()
 				// in this case, we just want to read its data
 				else
 				{
+					//int login_state = -1; //NOT WORKING
 					char buffer[256];
 					bzero(buffer, sizeof(buffer));
 					int bytes = recv(fd, buffer, sizeof(buffer), 0);
+
 					if (bytes == 0) // client has closed the connection
 					{
 						printf("connection closed from client side \n");
@@ -247,77 +372,8 @@ int main()
 						// once we are done handling the connection, remove the socket from the list of file descriptors that we are watching
 						FD_CLR(fd, &all_sockets);
 					}
-
-					printf("%s---", buffer);
-					if (strstr(buffer, "USER") != NULL)
-					{
-						char *username = buffer + 5;
-						for (int i = 0; i < arr_size - 1; i++)
-						{
-							// printf("USERS: %s \n",data[i].user);
-							if (strcmp(username, data[i].user) == 0)
-							{
-								login = 1;
-								printf("SENDING... %s", flag);
-								send(fd, flag, sizeof(flag), 0);
-								break;
-							}
-							else
-							{
-								login = 0;
-								printf("ERR");
-							}
-						}
-						if (login == 0)
-						{
-							send(fd, flag_1, sizeof(flag_1), 0);
-						}
-					}
-
-					if (strstr(buffer, "PASS") != NULL)
-					{
-						char *password = buffer + 5;
-						for (int i = 0; i < arr_size - 1; i++)
-						{
-							if (strcmp(password, data[i].pass) == 0)
-							{
-								login = 1;
-								send(fd, flag, sizeof(flag), 0);
-								break;
-							}
-							else
-							{
-								login = 0;
-							}
-						}
-						if (login == 0)
-						{
-							send(fd, flag_1, sizeof(flag_1), 0);
-						}
-					}
-
-					if (strstr(buffer, "STOR") != NULL)
-					{
-						int cln_conn = tempconnect();
-						char *name = buffer + 16;
-						printf("Received PUT request for %s.\n", name);
-						FILE *fp;
-						fp = fopen(name, "wb");
-						// ofstream outfile(name, ofstream::binary);
-						char *buff[MAX];
-						bzero(buf, MAX);
-						int total = 0, ln;
-						while ((ln = read(cln_conn, buf, MAX)) > 0)
-						{
-							fwrite(buf, 1, sizeof(buf), fp);
-							// outfile.write(buf, ln);
-							total += ln;
-							if (ln < MAX)
-								break;
-						}
-						printf("Bytes of data received for %s = %d.\n", name, total);
-						fclose(fp);
-					}
+					handleCommands(fd, buffer, &login_state);
+					
 				}
 			}
 		}
