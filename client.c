@@ -8,29 +8,28 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
-#define PORT 9007  // Control Channel PORT
-#define CPORT 8080 // Data Channel PORT - should be random later
+#define S_PORT 9007 // Control Channel PORT
+#define C_PORT 8080 // Data Channel PORT - should be random later
 
 char buf[1023]; // buffer for receiving data - should make sense later
 
 bool running = true;
 bool dataTransferRunning = false;
 
-int dataconn()
+int listenOnDataChannel()
 {
-	int cln_socket;
-	cln_socket = socket(AF_INET, SOCK_STREAM, 0);
+	int cSocket;
+	cSocket = socket(AF_INET, SOCK_STREAM, 0);
 
 	// check for fail error
-	if (cln_socket == -1)
+	if (cSocket == -1)
 	{
-		printf("socket creation failed..\n");
+		printf("Data channel creation has failed. \n");
 		exit(EXIT_FAILURE);
 	}
 
 	// setsock
 	int value = 1;
-
 	// Reuse port after Service ends
 	setsockopt(cln_socket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
@@ -38,11 +37,11 @@ int dataconn()
 	struct sockaddr_in cln_address;
 	bzero(&cln_address, sizeof(cln_address));
 	cln_address.sin_family = AF_INET;
-	cln_address.sin_port = htons(CPORT);
+	cln_address.sin_port = htons(C_PORT);
 	cln_address.sin_addr.s_addr = INADDR_ANY;
 
 	// FOR Server connections later in the code
-	//  Server socket address structures
+	// Server socket address structures
 	struct sockaddr_in svc_address;
 
 	// Stores byte size of server socket address
@@ -65,15 +64,14 @@ int dataconn()
 		exit(EXIT_FAILURE);
 	}
 
-	printf("Client started on and is listening on PORT [%d]\n", CPORT);
+	printf("Client has started and is listening on PORT [%d]\n", C_PORT);
 
 	addr_size = sizeof(svc_address);
-
-	int server_socket = accept(
+	int dataSocket = accept(
 		cln_socket, (struct sockaddr *)&cln_address,
 		&addr_size);
 
-	return server_socket;
+	return dataSocket;
 }
 
 void handleCommands(char buffer[], int cSocket)
@@ -86,7 +84,7 @@ void handleCommands(char buffer[], int cSocket)
 	if (strstr(command, "QUIT"))
 	{
 		printf("221 Service closing control connection. \n");
-		// close(*cSocket);
+		close(cSocket);
 		running = false;
 	}
 	else if (strstr(command, "!CWD"))
@@ -100,20 +98,6 @@ void handleCommands(char buffer[], int cSocket)
 	else if (strstr(command, "!LIST"))
 	{
 		printf("LIST COMMAND ON MACHINE\n");
-	}
-
-	// DATA channel Commands
-	else if (login_state == 1 && strstr(command, "LIST"))
-	{
-		printf("DATA CHANNEL: LIST");
-	}
-	else if (login_state == 1 && strstr(command, "RETR"))
-	{
-		printf("DATA CHANNEL: RETR");
-	}
-	else if (login_state == 1 && strstr(command, "STOR"))
-	{
-		printf("DATA CHANNEL: STOR");
 	}
 	// Control Channel Commands
 	else
@@ -129,76 +113,84 @@ void handleCommands(char buffer[], int cSocket)
 		char statusCode[4];
 		strncpy(statusCode, buffer + 0, 3);
 
-		if (login_state == -1)
+		if (login_state == -1 && strstr(command, "USER") && statusCode == "331")
 		{
-			if (strstr(command, "USER") && statusCode == "331")
+			// TO-DO:
+			// char cwd[500];
+			// if (getcwd(cwd, sizeof(cwd)) != NULL)
+			// {
+			// 	printf("Current working dir: %s\n", cwd);
+			// }
+			// if (strstr(buffer, "STOR") != NULL)
+			// {
+			// 	send(cSocket, buffer, strlen(buffer), 0);
+			// 	int datafd = dataconn();
+
+			// 	char *filename = buffer + 5;
+			// 	// printf("FN: %s\n",filename);
+
+			// 	FILE *fp;
+			// 	fp = fopen(filename, "rb");
+			// 	// char *temp, *filename = buffer+5;
+
+			// 	if (fp == NULL)
+			// 	{
+			// 		printf("can't open %s\n", filename);
+			// 	}
+			// 	printf("Sending STOR Request for %s.\n", filename);
+			// 	write(cSocket, buf, sizeof(buf));
+			// 	struct stat stat_buf;
+			// 	int rc = stat(filename, &stat_buf);
+			// 	int fsize = stat_buf.st_size;
+			// 	printf("%s size is %d bytes.\n", filename, fsize);
+			// 	char *databuff[fsize + 1];
+			// 	fread(databuff, 1, sizeof(databuff), fp);
+			// 	int total = 0, bytesleft = fsize, ln;
+			// 	printf("Sending %s......\n", filename);
+
+			// 	while (total < fsize)
+			// 	{
+			// 		printf("%ld \n", sizeof(databuff));
+			// 		ln = send(datafd, databuff + total, bytesleft, 0);
+			// 		printf("%ld \n", sizeof(ln));
+			// 		if (ln == -1)
+			// 			break;
+			// 		total += ln;
+			// 		bytesleft -= ln;
+			// 	}
+			// 	printf("Total data sent for %s = %d bytes.\n", filename, total);
+			// 	bzero(databuff, sizeof(databuff));
+			// 	fclose(fp);
+
+			// 	bzero(buffer, sizeof(buffer));
+			// }
+		}
+		else if (login_state == 0 && strstr(command, "PASS") && statusCode == "230")
+		{
+			login_state++;
+		}
+		else if (login_state == 1)
+		{
+			if (strstr(command, "CWD") && statusCode == "200")
 			{
-				login_state++;
+				printf("SERVER RESPONSE FOR CWD:\n%s", buffer);
 			}
-			else if (login_state == 0 && strstr(command, "PASS") && statusCode == "230")
+			else if (strstr(command, "PWD" && statusCode == "257"))
 			{
-				login_state++;
+				printf("SERVER RESPONSE FOR PWD:\n%s", buffer);
 			}
-			else if (login_state == 1) // USER IS LOGGED IN
+			// Data Channel Commands
+			else if (strstr(command, "LIST") && statusCode == "150")
 			{
-				if (strstr(command, "CWD") && statusCode == "200")
-				{
-					printf("SERVER RESPONSE FOR CWD:\n%s", buffer);
-				}
-				else if (strstr(command, "PWD" && statusCode == "257"))
-				{
-					printf("SERVER RESPONSE FOR PWD:\n%s", buffer);
-				}
-
-				// TO-DO:
-				// char cwd[500];
-				// if (getcwd(cwd, sizeof(cwd)) != NULL)
-				// {
-				// 	printf("Current working dir: %s\n", cwd);
-				// }
-				// if (strstr(buffer, "STOR") != NULL)
-				// {
-				// 	send(cSocket, buffer, strlen(buffer), 0);
-				// 	int datafd = dataconn();
-
-				// 	char *filename = buffer + 5;
-				// 	// printf("FN: %s\n",filename);
-
-				// 	FILE *fp;
-				// 	fp = fopen(filename, "rb");
-				// 	// char *temp, *filename = buffer+5;
-
-				// 	if (fp == NULL)
-				// 	{
-				// 		printf("can't open %s\n", filename);
-				// 	}
-				// 	printf("Sending STOR Request for %s.\n", filename);
-				// 	write(cSocket, buf, sizeof(buf));
-				// 	struct stat stat_buf;
-				// 	int rc = stat(filename, &stat_buf);
-				// 	int fsize = stat_buf.st_size;
-				// 	printf("%s size is %d bytes.\n", filename, fsize);
-				// 	char *databuff[fsize + 1];
-				// 	fread(databuff, 1, sizeof(databuff), fp);
-				// 	int total = 0, bytesleft = fsize, ln;
-				// 	printf("Sending %s......\n", filename);
-
-				// 	while (total < fsize)
-				// 	{
-				// 		printf("%ld \n", sizeof(databuff));
-				// 		ln = send(datafd, databuff + total, bytesleft, 0);
-				// 		printf("%ld \n", sizeof(ln));
-				// 		if (ln == -1)
-				// 			break;
-				// 		total += ln;
-				// 		bytesleft -= ln;
-				// 	}
-				// 	printf("Total data sent for %s = %d bytes.\n", filename, total);
-				// 	bzero(databuff, sizeof(databuff));
-				// 	fclose(fp);
-
-				// 	bzero(buffer, sizeof(buffer));
-				// }
+				printf("DATA CHANNEL: LIST");
+			}
+			else if (strstr(command, "RETR") && statusCode == "150")
+			{
+				printf("DATA CHANNEL: RETR");
+			}
+			else if (strstr(command, "STOR") && statusCode == "150")
+			{
+				printf("DATA CHANNEL: STOR");
 			}
 		}
 	}
@@ -225,7 +217,7 @@ int controlSocket()
 	struct sockaddr_in server_address;
 	bzero(&server_address, sizeof(server_address));
 	server_address.sin_family = AF_INET;
-	server_address.sin_port = htons(PORT);
+	server_address.sin_port = htons(S_PORT);
 	server_address.sin_addr.s_addr = INADDR_ANY;
 
 	// connect
