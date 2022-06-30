@@ -15,10 +15,10 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 21 // Control Channel
-#define S_DATAPORT 20    // Data Channel
+#define S_CONTROLPORT 31 // Control Channel
+#define S_DATAPORT 30    // Data Channel
 
-#define C_PORT 8085 // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_PORT 8086 // Client Data Channel PORT - this will update based on what we receive from PORT
 
 int createSocket(bool lstn, int sPort, int cPort);
 
@@ -104,8 +104,7 @@ void performPWD(int client)
 
 void performCWD(int client, char *buffer)
 {
-    char directory[BUFFER_SIZE - 4];
-    strncpy(directory, buffer + 4, BUFFER_SIZE - 4);
+    char *directory = buffer + 4;
     if (chdir(directory) != 0)
     {
         send(client, responseMsg(500), BUFFER_SIZE, 0);
@@ -160,27 +159,58 @@ void performRETR(int client, char *filename)
     {
         printf("Can't open %s\n", filename);
     }
-
-    struct stat stat_buf;
-    int rc = stat(filename, &stat_buf);
-    int fsize = stat_buf.st_size;
-
-    char *databuff[fsize + 1];
-    fread(databuff, 1, sizeof(databuff), f);
-
-    int total = 0, bytesleft = fsize, ln;
-
-    while (total < fsize)
+    else
     {
-        ln = send(channel, databuff + total, bytesleft, 0);
-        if (ln == -1)
+        struct stat stat_buf;
+        int rc = stat(filename, &stat_buf);
+        int fsize = stat_buf.st_size;
+
+        char *databuff[fsize + 1];
+        fread(databuff, 1, sizeof(databuff), f);
+
+        int total = 0, bytesleft = fsize, ln;
+
+        while (total < fsize)
+        {
+            ln = send(channel, databuff + total, bytesleft, 0);
+            if (ln == -1)
+            {
+                break;
+            }
+            total += ln;
+            bytesleft -= ln;
+        }
+        bzero(databuff, sizeof(databuff));
+        fclose(f);
+    }
+    close(channel);
+}
+
+void performSTOR(int client, char *filename)
+{
+    send(client, responseMsg(150), BUFFER_SIZE, 0);
+    usleep(1000);
+    int channel = createSocket(false, S_DATAPORT, C_PORT);
+
+    printf("%s\n", filename);
+
+    char reader[BUFFER_SIZE];
+    bzero(reader, BUFFER_SIZE);
+
+    FILE *f;
+    f = fopen(filename, "wb");
+
+    int total = 0, ln;
+    while ((ln = read(channel, reader, BUFFER_SIZE)) > 0)
+    {
+        fwrite(reader, 1, BUFFER_SIZE, f);
+        total += ln;
+        if (ln < BUFFER_SIZE)
         {
             break;
         }
-        total += ln;
-        bytesleft -= ln;
     }
-    bzero(databuff, sizeof(databuff));
+    printf("Total data received for %s = %d bytes.\n", filename, total);
     fclose(f);
     close(channel);
 }
@@ -277,7 +307,6 @@ void handleCommands(int client, char *buffer, int *login_state)
     }
     else if (strstr(command, "RETR"))
     {
-        printf("IN RETR\n");
         int pid = fork();
         if (pid == 0)
         {
@@ -285,6 +314,16 @@ void handleCommands(int client, char *buffer, int *login_state)
             exit(EXIT_SUCCESS);
         }
     }
+    else if (strstr(command, "STOR"))
+    {
+        int pid = fork();
+        if (pid == 0)
+        {
+            performSTOR(client, buffer + 5);
+            exit(EXIT_SUCCESS);
+        }
+    }
+
     else
     {
         send(client, responseMsg(202), BUFFER_SIZE, 0);

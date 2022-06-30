@@ -13,11 +13,11 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 21 // Control Channel
-#define S_DATAPORT 20    // Data Channel
+#define S_CONTROLPORT 31 // Control Channel
+#define S_DATAPORT 30    // Data Channel
 
 #define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
-#define C_DATAPORT 8085    // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_DATAPORT 8086    // Client Data Channel PORT - this will update based on what we receive from PORT
 
 bool running = true;
 int login_state = 1;
@@ -186,49 +186,7 @@ void handleCommands(char buffer[], int cSocket)
 
         if (login_state == -1 && strstr(command, "USER") && strcmp(statusCode, "331"))
         {
-            // if (strstr(buffer, "STOR") != NULL)
-            // {
-            // 	send(cSocket, buffer, strlen(buffer), 0);
-            // 	int datafd = dataconn();
-
-            // 	char *filename = buffer + 5;
-            // 	// printf("FN: %s\n",filename);
-
-            // 	FILE *fp;
-            // 	fp = fopen(filename, "rb");
-            // 	// char *temp, *filename = buffer+5;
-
-            // 	if (fp == NULL)
-            // 	{
-            // 		printf("can't open %s\n", filename);
-            // 	}
-            // 	printf("Sending STOR Request for %s.\n", filename);
-            // 	write(cSocket, buf, sizeof(buf));
-            // 	struct stat stat_buf;
-            // 	int rc = stat(filename, &stat_buf);
-            // 	int fsize = stat_buf.st_size;
-            // 	printf("%s size is %d bytes.\n", filename, fsize);
-            // 	char *databuff[fsize + 1];
-            // 	fread(databuff, 1, sizeof(databuff), fp);
-            // 	int total = 0, bytesleft = fsize, ln;
-            // 	printf("Sending %s......\n", filename);
-
-            // 	while (total < fsize)
-            // 	{
-            // 		printf("%ld \n", sizeof(databuff));
-            // 		ln = send(datafd, databuff + total, bytesleft, 0);
-            // 		printf("%ld \n", sizeof(ln));
-            // 		if (ln == -1)
-            // 			break;
-            // 		total += ln;
-            // 		bytesleft -= ln;
-            // 	}
-            // 	printf("Total data sent for %s = %d bytes.\n", filename, total);
-            // 	bzero(databuff, sizeof(databuff));
-            // 	fclose(fp);
-
-            // 	bzero(buffer, sizeof(buffer));
-            // }
+            login_state++;
         }
         else if (login_state == 0 && strstr(command, "PASS") && strcmp(statusCode, "230"))
         {
@@ -312,7 +270,56 @@ void handleCommands(char buffer[], int cSocket)
             }
             else if (strstr(command, "STOR") && strcmp(statusCode, "150") == 0)
             {
-                // int channel = createSocket(false, C_PORT);
+                int pid = fork();
+                if (pid == 0)
+                {
+                    // data channel is ready
+                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int client = accept(channel, 0, 0);
+                    if (client < 0)
+                    {
+                        printf("Accept failed.\n");
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(channel);
+
+                    char *filename = request + 5;
+                    FILE *f;
+                    f = fopen(filename, "rb");
+                    if (f == NULL)
+                    {
+                        printf("Can't open %s\n", filename);
+                    }
+                    else
+                    {
+                        struct stat stat_buf;
+                        int rc = stat(filename, &stat_buf);
+                        int fsize = stat_buf.st_size;
+
+                        printf("%s size is %d bytes.\n", filename, fsize);
+
+                        char *databuff[fsize + 1];
+                        fread(databuff, 1, sizeof(databuff), f);
+
+                        int total = 0, bytesleft = fsize, ln;
+                        while (total < fsize)
+                        {
+                            ln = send(channel, databuff + total, bytesleft, 0);
+                            if (ln == -1)
+                            {
+                                break;
+                            }
+                            total += ln;
+                            bytesleft -= ln;
+                        }
+                        bzero(databuff, sizeof(databuff));
+                        fclose(f);
+                    }
+
+                    close(client);
+                    exit(EXIT_FAILURE);
+                }
             }
         }
     }
@@ -328,7 +335,7 @@ int main()
     while (running)
     {
         // take command input
-        printf("ftp> ");
+        // printf("ftp> ");
 
         fgets(buffer, BUFFER_SIZE, stdin);
 
