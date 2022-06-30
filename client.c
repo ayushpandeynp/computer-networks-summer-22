@@ -11,18 +11,21 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_PORT 21   // Control Channel PORT
-#define C_PORT 8080 // Data Channel PORT - should be random later
+#define S_CONTROLPORT 21 // Control Channel
+#define S_DATAPORT 20    // Data Channel
+
+#define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
+#define C_DATAPORT 8083    // Client Data Channel PORT - this will update based on what we receive from PORT
 
 bool running = true;
-int login_state = -1;
+int login_state = 1;
 
 void portCommand()
 {
     // todo: send port data to server on control channel
 }
 
-int createSocket(bool lstn, int port)
+int createSocket(bool lstn, int sPort, int cPort)
 {
     // create a socket - Control Channel Socket
     int cSocket;
@@ -39,19 +42,31 @@ int createSocket(bool lstn, int port)
     int value = 1; // scope is closed only until next line
     setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
-    struct sockaddr_in addr;
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    struct sockaddr_in sAddr, cAddr;
+    bzero(&sAddr, sizeof(sAddr));
+    bzero(&cAddr, sizeof(cAddr));
+
+    sAddr.sin_family = AF_INET;
+    sAddr.sin_port = htons(sPort);
+    sAddr.sin_addr.s_addr = INADDR_ANY;
 
     if (!lstn)
     {
-        // connect
+        cAddr.sin_family = AF_INET;
+        cAddr.sin_port = htons(cPort);
+        cAddr.sin_addr.s_addr = INADDR_ANY;
+
+        // binding client port
+        if (bind(cSocket, (struct sockaddr *)&cAddr, sizeof(struct sockaddr_in)) != 0)
+        {
+            printf("Could not bind.\n");
+        }
+
+        // connecting to server port
         int connection_status =
             connect(cSocket,
-                    (struct sockaddr *)&addr,
-                    sizeof(addr));
+                    (struct sockaddr *)&sAddr,
+                    sizeof(sAddr));
 
         // check for errors with the connection
         if (connection_status == -1)
@@ -64,8 +79,8 @@ int createSocket(bool lstn, int port)
     {
         // bind the socket to our specified IP and port
         if (bind(cSocket,
-                 (struct sockaddr *)&addr,
-                 sizeof(addr)) < 0)
+                 (struct sockaddr *)&sAddr,
+                 sizeof(sAddr)) < 0)
         {
             printf("socket bind failed..\n");
             exit(EXIT_FAILURE);
@@ -79,15 +94,7 @@ int createSocket(bool lstn, int port)
             exit(EXIT_FAILURE);
         }
 
-        printf("Client has started and is listening on PORT [%d]\n", port);
-
-        // FOR Server connections later in the code
-        // Server socket address structures
-        struct sockaddr_in svc_address;
-        socklen_t addr_size = sizeof(svc_address);
-        int dataSocket = accept(
-            cSocket, (struct sockaddr *)&addr,
-            &addr_size);
+        printf("Server is listening on PORT [%d]\n", sPort);
     }
 
     return cSocket;
@@ -182,7 +189,7 @@ void handleCommands(char buffer[], int cSocket)
         char statusCode[4];
         strncpy(statusCode, buffer + 0, 3);
 
-        if (login_state == -1 && strstr(command, "USER") && statusCode == "331")
+        if (login_state == -1 && strstr(command, "USER") && strcmp(statusCode, "331"))
         {
             // if (strstr(buffer, "STOR") != NULL)
             // {
@@ -228,44 +235,62 @@ void handleCommands(char buffer[], int cSocket)
             // 	bzero(buffer, sizeof(buffer));
             // }
         }
-        else if (login_state == 0 && strstr(command, "PASS") && statusCode == "230")
+        else if (login_state == 0 && strstr(command, "PASS") && strcmp(statusCode, "230"))
         {
             login_state++;
         }
         else if (login_state == 1)
         {
-            if (strstr(command, "CWD") && statusCode == "200")
-            {
-                printf("SERVER RESPONSE FOR CWD:\n%s", buffer);
-            }
-            else if (strstr(command, "PWD" && statusCode == "257"))
-            {
-                printf("SERVER RESPONSE FOR PWD:\n%s", buffer);
-            }
-            // Data Channel Commands
-            else if (strstr(command, "LIST") && statusCode == "150")
-            {
-                printf("DATA CHANNEL: LIST");
-                int channel = createSocket(true, C_PORT);
-            }
-            else if (strstr(command, "RETR") && statusCode == "150")
-            {
-                printf("DATA CHANNEL: RETR");
-                int channel = createSocket(true, C_PORT);
-            }
-            else if (strstr(command, "STOR") && statusCode == "150")
+            if (strstr(command, "LIST") && strcmp(statusCode, "150") == 0)
             {
 
+                int pid = fork();
+                if (pid == 0)
+                {
+                    // data channel is ready
+                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int client = accept(channel, 0, 0);
+                    if (client < 0)
+                    {
+                        printf("Accept failed..\n");
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                    }
+                    else
+                    {
+                        printf("ACCEPTED CONNECTION.\n");
+                        send(cSocket, "YES", 4, 0);
+                    }
+
+                    bzero(buffer, BUFFER_SIZE);
+                    int bytes = recv(client, buffer, BUFFER_SIZE, 0);
+                    printf("RECEIVED: %s\n", buffer);
+                    if (bytes == 0) // server has closed the connection
+                    {
+                        printf("connection closed from server side \n");
+                        close(channel);
+                    }
+
+                    printf("%s\n", buffer);
+                }
+            }
+            else if (strstr(command, "RETR") && strcmp(statusCode, "150") == 0)
+            {
+                printf("DATA CHANNEL: RETR");
+                int channel = createSocket(true, S_DATAPORT, C_DATAPORT);
+            }
+            else if (strstr(command, "STOR") && strcmp(statusCode, "150") == 0)
+            {
                 // int channel = createSocket(false, C_PORT);
             }
         }
     }
-    bzero(buffer, sizeof(buffer));
+    bzero(buffer, BUFFER_SIZE);
 }
 
 int main()
 {
-    int cSocket = createSocket(false, S_PORT);
+    int cSocket = createSocket(false, S_CONTROLPORT, 0);
 
     // accept command
     char buffer[BUFFER_SIZE];
@@ -273,7 +298,7 @@ int main()
     {
         // take command input
         printf("ftp> ");
-        fgets(buffer, sizeof(buffer), stdin);
+        fgets(buffer, BUFFER_SIZE, stdin);
 
         // remove trailing newline char from buffer, fgets doesn't do it
         buffer[strcspn(buffer, "\n")] = 0; // review 0 or '0'

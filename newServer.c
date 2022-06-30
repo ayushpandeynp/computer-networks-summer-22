@@ -15,7 +15,9 @@
 #define S_CONTROLPORT 21 // Control Channel
 #define S_DATAPORT 20    // Data Channel
 
-#define C_PORT 8080 // Client Control Channel PORT - this will update based on what we receive from PORT
+#define C_PORT 8083 // Client Data Channel PORT - this will update based on what we receive from PORT
+
+int createSocket(bool lstn, int sPort, int cPort);
 
 char *responseMsg(int statusCode)
 {
@@ -69,6 +71,14 @@ char *responseMsg(int statusCode)
         strcpy(response, msg);
         break;
     }
+
+    case 150:
+    {
+        char msg[] = "150 File status okay; about to open data connection.";
+        response = (char *)malloc(strlen(msg));
+        strcpy(response, msg);
+        break;
+    }
     }
 
     return response;
@@ -103,7 +113,17 @@ void performCWD(int client, char *buffer)
     }
 }
 
-int createSocket(bool lstn, int port)
+void performLIST(int client)
+{
+    send(client, responseMsg(150), BUFFER_SIZE, 0);
+    int channel = createSocket(false, C_PORT, S_DATAPORT);
+
+    char m[256] = "MSG IS HERE";
+    send(channel, m, BUFFER_SIZE, 0);
+    close(channel);
+}
+
+int createSocket(bool lstn, int sPort, int cPort)
 {
     // create a socket - Control Channel Socket
     int cSocket;
@@ -120,19 +140,31 @@ int createSocket(bool lstn, int port)
     int value = 1; // scope is closed only until next line
     setsockopt(cSocket, SOL_SOCKET, SO_REUSEADDR, &value, sizeof(value));
 
-    struct sockaddr_in addr;
-    bzero(&addr, sizeof(addr));
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons(port);
-    addr.sin_addr.s_addr = INADDR_ANY;
+    struct sockaddr_in sAddr, cAddr;
+    bzero(&sAddr, sizeof(sAddr));
+    bzero(&cAddr, sizeof(cAddr));
+
+    sAddr.sin_family = AF_INET;
+    sAddr.sin_port = htons(sPort);
+    sAddr.sin_addr.s_addr = INADDR_ANY;
 
     if (!lstn)
     {
-        // connect
+        cAddr.sin_family = AF_INET;
+        cAddr.sin_port = htons(cPort);
+        cAddr.sin_addr.s_addr = INADDR_ANY;
+
+        // binding client port
+        if (bind(cSocket, (struct sockaddr *)&cAddr, sizeof(struct sockaddr_in)) != 0)
+        {
+            printf("Could not bind\n");
+        }
+
+        // connecting to server port
         int connection_status =
             connect(cSocket,
-                    (struct sockaddr *)&addr,
-                    sizeof(addr));
+                    (struct sockaddr *)&sAddr,
+                    sizeof(sAddr));
 
         // check for errors with the connection
         if (connection_status == -1)
@@ -145,8 +177,8 @@ int createSocket(bool lstn, int port)
     {
         // bind the socket to our specified IP and port
         if (bind(cSocket,
-                 (struct sockaddr *)&addr,
-                 sizeof(addr)) < 0)
+                 (struct sockaddr *)&sAddr,
+                 sizeof(sAddr)) < 0)
         {
             printf("socket bind failed..\n");
             exit(EXIT_FAILURE);
@@ -160,7 +192,7 @@ int createSocket(bool lstn, int port)
             exit(EXIT_FAILURE);
         }
 
-        printf("Server has started and is listening on PORT [%d]\n", port);
+        printf("Server is listening on PORT [%d]\n", sPort);
     }
 
     return cSocket;
@@ -179,14 +211,23 @@ void handleCommands(int client, char *buffer, int *login_state)
     {
         performCWD(client, buffer);
     }
+    else if (strstr(command, "LIST"))
+    {
+        int pid = fork();
+        if (pid == 0)
+        {
+            performLIST(client);
+        }
+    }
     else
     {
         send(client, responseMsg(202), BUFFER_SIZE, 0);
     }
 }
+
 int main()
 {
-    int sSocket = createSocket(true, S_CONTROLPORT);
+    int sSocket = createSocket(true, S_CONTROLPORT, 0);
 
     // DECLARE 2 fd sets (file descriptor sets : a collection of file descriptors)
     fd_set all_sockets;
