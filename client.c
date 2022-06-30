@@ -1,18 +1,20 @@
 #include <stdio.h>
 #include <strings.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <sys/stat.h>
-#include <unistd.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
 
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <sys/stat.h>
+
+#include <unistd.h>
+
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 21 // Control Channel
-#define S_DATAPORT 20    // Data Channel
+#define S_CONTROLPORT 41 // Control Channel
+#define S_DATAPORT 40   // Data Channel
 
 #define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
 #define C_DATAPORT 8083    // Client Data Channel PORT - this will update based on what we receive from PORT
@@ -34,7 +36,7 @@ int createSocket(bool lstn, int sPort, int cPort)
     // check for fail error - for control
     if (cSocket == -1)
     {
-        printf("socket creation failed..\n");
+        printf("Socket creation failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -82,19 +84,17 @@ int createSocket(bool lstn, int sPort, int cPort)
                  (struct sockaddr *)&sAddr,
                  sizeof(sAddr)) < 0)
         {
-            printf("socket bind failed..\n");
+            printf("Socket bind failed.\n");
             exit(EXIT_FAILURE);
         }
 
         // after it is bound, we can listen for connections with queue length of 5
         if (listen(cSocket, 5) < 0)
         {
-            printf("Listen failed..\n");
+            printf("Listen failed.\n");
             close(cSocket);
             exit(EXIT_FAILURE);
         }
-
-        printf("Server is listening on PORT [%d]\n", sPort);
     }
 
     return cSocket;
@@ -243,35 +243,39 @@ void handleCommands(char buffer[], int cSocket)
         {
             if (strstr(command, "LIST") && strcmp(statusCode, "150") == 0)
             {
-
                 int pid = fork();
                 if (pid == 0)
                 {
                     // data channel is ready
                     int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    sleep(3);
+                    send(cSocket, "OK", BUFFER_SIZE, 0);
+
                     int client = accept(channel, 0, 0);
                     if (client < 0)
                     {
-                        printf("Accept failed..\n");
+                        printf("Accept failed.\n");
                         close(channel);
                         exit(EXIT_FAILURE);
                     }
-                    else
+                    close(channel);
+
+                    while (1)
                     {
-                        printf("ACCEPTED CONNECTION.\n");
-                        send(cSocket, "YES", 4, 0);
+                        bzero(buffer, BUFFER_SIZE);
+                        int bytes = recv(client, buffer, BUFFER_SIZE, 0);
+                        if (bytes == 0) // client has closed the connection
+                        {
+                            close(client);
+                            break;
+                        }
+
+                        printf("%s \n", buffer);
                     }
 
-                    bzero(buffer, BUFFER_SIZE);
-                    int bytes = recv(client, buffer, BUFFER_SIZE, 0);
-                    printf("RECEIVED: %s\n", buffer);
-                    if (bytes == 0) // server has closed the connection
-                    {
-                        printf("connection closed from server side \n");
-                        close(channel);
-                    }
-
-                    printf("%s\n", buffer);
+                    printf("MMftp> ");
+                    close(client);
+                    exit(EXIT_FAILURE);
                 }
             }
             else if (strstr(command, "RETR") && strcmp(statusCode, "150") == 0)

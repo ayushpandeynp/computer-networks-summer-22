@@ -1,19 +1,21 @@
 #include <stdio.h>
-#include <string.h>
-#include <sys/socket.h>
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <unistd.h>
-#include <stdlib.h>
-#include <sys/time.h>
-#include <sys/select.h>
+#include <strings.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
+
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#include <netinet/in.h>
+
+#include <unistd.h>
+#include <sys/time.h>
+#include <sys/select.h>
+
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 21 // Control Channel
-#define S_DATAPORT 20    // Data Channel
+#define S_CONTROLPORT 41 // Control Channel
+#define S_DATAPORT 40    // Data Channel
 
 #define C_PORT 8083 // Client Data Channel PORT - this will update based on what we receive from PORT
 
@@ -42,7 +44,7 @@ char *responseMsg(int statusCode)
 
     case 230:
     {
-        char msg[] = "230 User logged in, please proceed...";
+        char msg[] = "230 User logged in, please proceed.";
         response = (char *)malloc(strlen(msg));
         strcpy(response, msg);
         break;
@@ -116,11 +118,25 @@ void performCWD(int client, char *buffer)
 void performLIST(int client)
 {
     send(client, responseMsg(150), BUFFER_SIZE, 0);
-    int channel = createSocket(false, C_PORT, S_DATAPORT);
+    char response[BUFFER_SIZE];
+    bzero(response, BUFFER_SIZE);
+    printf("WAITING FOR OK...\n");
+    recv(client, response, BUFFER_SIZE, 0);
 
-    char m[256] = "MSG IS HERE";
-    send(channel, m, BUFFER_SIZE, 0);
-    close(channel);
+    if (strstr(response, "OK"))
+    {
+        int pid = fork();
+        if (pid == 0)
+        {
+            int channel = createSocket(false, C_PORT, S_DATAPORT);
+
+            char m[256] = "MSG IS HERE";
+            send(channel, m, BUFFER_SIZE, 0);
+
+            close(channel);
+            printf("ftp> ");
+        }
+    }
 }
 
 int createSocket(bool lstn, int sPort, int cPort)
@@ -132,7 +148,7 @@ int createSocket(bool lstn, int sPort, int cPort)
     // check for fail error - for control
     if (cSocket == -1)
     {
-        printf("socket creation failed..\n");
+        printf("Socket creation failed.\n");
         exit(EXIT_FAILURE);
     }
 
@@ -180,14 +196,14 @@ int createSocket(bool lstn, int sPort, int cPort)
                  (struct sockaddr *)&sAddr,
                  sizeof(sAddr)) < 0)
         {
-            printf("socket bind failed..\n");
+            printf("Socket bind failed.\n");
             exit(EXIT_FAILURE);
         }
 
         // after it is bound, we can listen for connections with queue length of 5
         if (listen(cSocket, 5) < 0)
         {
-            printf("Listen failed..\n");
+            printf("Listen failed.\n");
             close(cSocket);
             exit(EXIT_FAILURE);
         }
@@ -213,10 +229,12 @@ void handleCommands(int client, char *buffer, int *login_state)
     }
     else if (strstr(command, "LIST"))
     {
+        printf("COMMAND: LIST\n");
         int pid = fork();
         if (pid == 0)
         {
             performLIST(client);
+            exit(EXIT_SUCCESS);
         }
     }
     else
@@ -280,6 +298,8 @@ int main()
                     }
 
                     int login_state = -1;
+
+                    printf("RECEIVED CMD: %s\n", buffer);
                     // when data is received
                     handleCommands(fd, buffer, &login_state);
                 }
