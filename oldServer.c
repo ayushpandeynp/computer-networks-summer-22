@@ -9,10 +9,10 @@
 #include <sys/select.h>
 #include <stdlib.h>
 #include <stdbool.h>
-#include <dirent.h> 
+#include <dirent.h>
 
-#define PORT 9007
-#define CPORT 8080
+#define PORT 21
+#define CPORT 8080 // this will update based on what we receive from PORT
 #define MAX 64
 
 int arr_size;
@@ -79,7 +79,7 @@ int load(char *filename)
 }
 //-------------------------------------------------------------------------------------------------------
 
-int tempconnect()
+int clientDataSocket(int port)
 {
 	int network_socket;
 	network_socket = socket(AF_INET, SOCK_STREAM, 0);
@@ -98,7 +98,7 @@ int tempconnect()
 	struct sockaddr_in server_address;
 	bzero(&server_address, sizeof(server_address));
 	server_address.sin_family = AF_INET;
-	server_address.sin_port = htons(CPORT);
+	server_address.sin_port = htons(port);
 	server_address.sin_addr.s_addr = INADDR_ANY;
 
 	printf("%d", INADDR_ANY);
@@ -119,13 +119,16 @@ int tempconnect()
 	return network_socket;
 }
 //-----------------------------------------------------------------------------------------------------------------
-void handleCommands(int fd, char buffer[], int* login_state){
-	
-	printf("INITIAL: %d\n",*login_state);
-	//char buffer[256]; buffer = buff;
-	char command[6]; char check_username[256];
+void handleCommands(int fd, char buffer[], int *login_state)
+{
+
+	printf("INITIAL: %d\n", *login_state);
+	// char buffer[256]; buffer = buff;
+	char command[6];
+	char check_username[256];
 	bzero(command, sizeof(command));
 	strncpy(command, buffer + 0, 5);
+	printf("--%s--",command);
 
 	char stsCode1[] = "530 Not logged in";
 	char stsCode2[] = "331 Username OK, need password";
@@ -134,13 +137,15 @@ void handleCommands(int fd, char buffer[], int* login_state){
 	char stsCode5[] = "202 Command not implemented";
 	char stsCode6[] = "257 ";
 
-	//Control Channel Commands after User Authentication
+	// Control Channel Commands after User Authentication
 	if (strstr(command, "CWD") != NULL && (*login_state == 1))
 	{
 		chdir("server_dir");
-		char ch_dir[500]; strncpy(ch_dir, buffer + 5, sizeof(buffer));
+		char ch_dir[500];
+		strncpy(ch_dir, buffer + 5, sizeof(buffer));
 		printf("dir: %s \n", ch_dir);
-		if(chdir(ch_dir) != 0){
+		if (chdir(ch_dir) != 0)
+		{
 			perror("No such directory");
 		}
 	}
@@ -148,17 +153,18 @@ void handleCommands(int fd, char buffer[], int* login_state){
 	{
 		chdir("server_dir");
 		char cwd[500];
-    	if (getcwd(cwd, sizeof(cwd)) != NULL) {
-    		strcat(stsCode6, cwd);
-    		printf("%s\n",stsCode6);
-       		send(fd, stsCode6, sizeof(stsCode6), 0);
-   		}
+		if (getcwd(cwd, sizeof(cwd)) != NULL)
+		{
+			strcat(stsCode6, cwd);
+			printf("%s\n", stsCode6);
+			send(fd, stsCode6, sizeof(stsCode6), 0);
+		}
 	}
 
-	//Data Channel Commands after User Authentication
+	// Data Channel Commands after User Authentication
 	else if (strstr(command, "STOR") != NULL && (*login_state == 1))
 	{
-		int cln_conn = tempconnect();
+		int cln_conn = clientDataSocket(CPORT);
 		char *name = command + 16;
 		printf("Received PUT request for %s.\n", name);
 		FILE *fp;
@@ -176,23 +182,21 @@ void handleCommands(int fd, char buffer[], int* login_state){
 		printf("Bytes of data received for %s = %d.\n", name, total);
 		fclose(fp);
 	}
-	else if(strstr(command, "RETR") != NULL && (*login_state == 1))
+	else if (strstr(command, "RETR") != NULL && (*login_state == 1))
 	{
-
 	}
-	else if(strstr(command, "LIST") != NULL && (*login_state == 1))
+	else if (strstr(command, "LIST") != NULL && (*login_state == 1))
 	{
-
+		printf("LIST command received");
 	}
-
-	//USER Authentication
-	else{
-		
+	// USER Authentication
+	else
+	{
 		if (strstr(command, "USER"))
 		{
 			char *username = buffer + 5;
-			printf("%s\n",username);
-			printf("HERE: %d\n",*login_state );
+			printf("%s\n", username);
+			printf("HERE: %d\n", *login_state);
 			for (int i = 0; i < arr_size - 1; i++)
 			{
 				if (strcmp(username, data[i].user) == 0)
@@ -206,7 +210,7 @@ void handleCommands(int fd, char buffer[], int* login_state){
 				}
 			}
 
-			printf("logn: %d\n",*login_state );
+			printf("logn: %d\n", *login_state);
 			if (*login_state == -1)
 			{
 				send(fd, stsCode1, sizeof(stsCode1), 0);
@@ -215,27 +219,37 @@ void handleCommands(int fd, char buffer[], int* login_state){
 		else if (strstr(command, "PASS") != NULL)
 		{
 			char *password = buffer + 5;
-			if(((*login_state) == 0)){
+			if (((*login_state) == 0))
+			{
 				for (int i = 0; i < arr_size - 1; i++)
 				{
-					if (strcmp(password, data[i].pass) == 0 && strcmp(check_username, data[i].user)==0)
+					if (strcmp(password, data[i].pass) == 0 && strcmp(check_username, data[i].user) == 0)
 					{
 						printf("MATCH\n");
 						(*login_state)++;
 						send(fd, stsCode3, sizeof(stsCode3), 0);
 						break;
 					}
-				}if(*login_state == 0){*login_state--; send(fd, stsCode1, sizeof(stsCode1), 0);}
-			}else if(*login_state == -1){
+				}
+				if (*login_state == 0)
+				{
+					*login_state--;
+					send(fd, stsCode1, sizeof(stsCode1), 0);
+				}
+			}
+			else if (*login_state == -1)
+			{
 				send(fd, stsCode1, sizeof(stsCode1), 0);
-			}else{
-				printf("%d\n",*login_state);
+			}
+			else
+			{
+				printf("%d\n", *login_state);
 				send(fd, stsCode4, sizeof(stsCode4), 0);
 			}
 		}
 		else
 		{
-			send(fd, stsCode5, sizeof(stsCode5), 0); 
+			send(fd, stsCode5, sizeof(stsCode5), 0);
 		}
 	}
 }
@@ -305,46 +319,18 @@ int main()
 	int login_state = -1;
 	while (1)
 	{
-		// notice so far, we have created 2 fd_sets : all_sockets , ready_sockets
-		// but we have only used the all_sockets and didn't touch the ready_sockets
-		// that is because select() is destructive: it's going to change the set we pass in
-		// so we need a temporary copy; that is what the other fd_set ready_sockets is for
-
-		// so that is why each iteration of the loop, we copy the all_sockets set into that temp fd_set
 		ready_sockets = all_sockets;
-
-		// now call select()
-		// 1st argument: range of file descriptors to check  [the highest file descriptor plus one]
-		// The maximum number of sockets supported by select() has an upper limit, represented by FD_SETSIZE (typically 1024).
-		// you can use any number of max connections depending on your context/requirements
-
-		// 2nd argument: set of file descriptors to check for reading (the ones we want select to keep an eye on)
-		// 3rd argument: set of file descriptors to check for writing (usually NULL)
-		// 4th argument: set of file descriptors to check for errors/exceptions (usually NULL)
-		// 5th argument: optional timeout value specifying the time to wait for select to compplete
 		if (select(FD_SETSIZE, &ready_sockets, NULL, NULL, NULL) < 0)
 		{
 			perror("select error");
 			exit(EXIT_FAILURE);
 		}
 
-		// when select returns, we know that one of our file descriptors has work for us to do
-		// but which one??
-		// select returns the fd_set containing JUST the file descriptors ready for reading
-		//(because select is destructive, so that is why we made the temp fd_set ready_sockets copy because we didn't want to lose the original set of file descriptors that we are watching)
-
-		// to know which ones are ready, we have to loop through and check
-		// go from 0 to FD_SETSIZE (the largest number of file descriptors that we can store in an fd_set)
 		for (int fd = 0; fd < FD_SETSIZE; fd++)
 		{
 			// check to see if that fd is SET
 			if (FD_ISSET(fd, &ready_sockets))
 			{
-				// if it is set, that means that fd has data that we can read right now
-				// when this happens, we are interested in TWO CASES
-
-				// 1st case: the fd is our server socket
-				// that means it is telling us there is a NEW CONNECTION that we can accept
 				if (fd == server_socket)
 				{
 					// accept that new connection
@@ -354,12 +340,8 @@ int main()
 					// add the newly accepted socket to the set of all sockets that we are watching
 					FD_SET(client_sd, &all_sockets);
 				}
-
-				// 2nd case: when the socket that is ready to read from is one from the all_sockets fd_set
-				// in this case, we just want to read its data
 				else
 				{
-					//int login_state = -1; //NOT WORKING
 					char buffer[256];
 					bzero(buffer, sizeof(buffer));
 					int bytes = recv(fd, buffer, sizeof(buffer), 0);
@@ -373,7 +355,6 @@ int main()
 						FD_CLR(fd, &all_sockets);
 					}
 					handleCommands(fd, buffer, &login_state);
-					
 				}
 			}
 		}

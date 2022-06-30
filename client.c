@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <string.h>
+#include <strings.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -9,10 +9,10 @@
 #include <stdbool.h>
 #include <dirent.h>
 
-#define S_PORT 9007 // Control Channel PORT
-#define C_PORT 8080 // Data Channel PORT - should be random later
+#define BUFFER_SIZE 1024
 
-char buf[1023]; // buffer for receiving data - should make sense later
+#define S_PORT 21   // Control Channel PORT
+#define C_PORT 8080 // Data Channel PORT - should be random later
 
 bool running = true;
 int login_state = -1;
@@ -21,6 +21,7 @@ void portCommand()
 {
     // todo: send port data to server on control channel
 }
+
 int createSocket(bool lstn, int port)
 {
     // create a socket - Control Channel Socket
@@ -78,7 +79,7 @@ int createSocket(bool lstn, int port)
             exit(EXIT_FAILURE);
         }
 
-        printf("Client has started and is listening on PORT [%d]\n", C_PORT);
+        printf("Client has started and is listening on PORT [%d]\n", port);
 
         // FOR Server connections later in the code
         // Server socket address structures
@@ -90,6 +91,57 @@ int createSocket(bool lstn, int port)
     }
 
     return cSocket;
+}
+
+void performLocalPWD()
+{
+    char *cwd;
+    if ((cwd = getcwd(NULL, 0)))
+    {
+        char msg[BUFFER_SIZE] = "Current working directory is: ";
+        strcat(msg, cwd);
+        printf("%s\n", msg);
+    }
+    else
+    {
+        printf("An unknown error occurred. Try again!\n");
+    }
+}
+
+void performLocalCWD(char *buffer)
+{
+    char directory[BUFFER_SIZE - 5];
+    strncpy(directory, buffer + 5, BUFFER_SIZE - 5);
+    if (chdir(directory) != 0)
+    {
+        printf("Directory doesn't exist. Try again!\n");
+    }
+    else
+    {
+        performLocalPWD();
+    }
+}
+
+void performLocalLIST()
+{
+    int count = 0;
+    struct dirent *dir;
+
+    DIR *d;
+    d = opendir(".");
+    if (d)
+    {
+        while ((dir = readdir(d)) != NULL)
+        {
+            if (count > 1)
+            {
+                char type = dir->d_type == 4 ? 'D' : 'F';
+                printf("%c\t%s\n", type, dir->d_name);
+            }
+            count++;
+        }
+        closedir(d);
+    }
 }
 
 void handleCommands(char buffer[], int cSocket)
@@ -106,50 +158,23 @@ void handleCommands(char buffer[], int cSocket)
     }
     else if (strstr(command, "!CWD"))
     {
-        char ch_dir[64];
-        strncpy(ch_dir, buffer + 5, sizeof(buffer));
-        printf("Directory changed to: %s \n", ch_dir);
-        if (chdir(ch_dir) != 0)
-        {
-            perror("[Error]: No such directory exists.");
-        }
+        performLocalCWD(buffer);
     }
     else if (strstr(command, "!PWD"))
     {
-        char cwd[64];
-        if (getcwd(cwd, sizeof(cwd)) != NULL)
-        {
-            printf("Current working dir: %s\n", cwd);
-        }
+        performLocalPWD();
     }
     else if (strstr(command, "!LIST"))
     {
-        int count = 0;
-        struct dirent *dir;
-
-        DIR *d;
-        d = opendir(".");
-        if (d)
-        {
-            while ((dir = readdir(d)) != NULL)
-            {
-                if (count > 1)
-                {
-                    char type = dir->d_type == 4 ? 'D' : 'F';
-                    printf("%c\t\t%s\n", type, dir->d_name);
-                }
-                count++;
-            }
-            closedir(d);
-        }
+        performLocalLIST();
     }
     // Control Channel Commands
     else
     {
         // send command to server
-        send(cSocket, buffer, strlen(buffer), 0);
-        bzero(buffer, sizeof(buffer));
-        recv(cSocket, buffer, sizeof(buffer), 0);
+        send(cSocket, buffer, BUFFER_SIZE, 0);
+        bzero(buffer, BUFFER_SIZE);
+        recv(cSocket, buffer, BUFFER_SIZE, 0);
 
         // printing message from server
         printf("%s\n", buffer);
@@ -159,12 +184,6 @@ void handleCommands(char buffer[], int cSocket)
 
         if (login_state == -1 && strstr(command, "USER") && statusCode == "331")
         {
-            // TO-DO:
-            // char cwd[500];
-            // if (getcwd(cwd, sizeof(cwd)) != NULL)
-            // {
-            // 	printf("Current working dir: %s\n", cwd);
-            // }
             // if (strstr(buffer, "STOR") != NULL)
             // {
             // 	send(cSocket, buffer, strlen(buffer), 0);
@@ -236,8 +255,8 @@ void handleCommands(char buffer[], int cSocket)
             }
             else if (strstr(command, "STOR") && statusCode == "150")
             {
-                printf("DATA CHANNEL: STOR");
-                int channel = createSocket(false, C_PORT);
+
+                // int channel = createSocket(false, C_PORT);
             }
         }
     }
@@ -249,7 +268,7 @@ int main()
     int cSocket = createSocket(false, S_PORT);
 
     // accept command
-    char buffer[256];
+    char buffer[BUFFER_SIZE];
     while (running)
     {
         // take command input
