@@ -110,8 +110,7 @@ void performLocalPWD()
 
 void performLocalCWD(char *buffer)
 {
-    char directory[BUFFER_SIZE - 5];
-    strncpy(directory, buffer + 5, BUFFER_SIZE - 5);
+    char *directory = buffer + 5;
     if (chdir(directory) != 0)
     {
         printf("Directory doesn't exist. Try again!\n");
@@ -146,6 +145,9 @@ void performLocalLIST()
 
 void handleCommands(char buffer[], int cSocket)
 {
+    char request[BUFFER_SIZE];
+    strcpy(request, buffer);
+
     char command[6];
     strncpy(command, buffer + 0, 5);
 
@@ -241,7 +243,6 @@ void handleCommands(char buffer[], int cSocket)
                 {
                     // data channel is ready
                     int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
-                    printf("LISTENING on PORT %d...\n", C_DATAPORT);
                     int client = accept(channel, 0, 0);
                     if (client < 0)
                     {
@@ -263,16 +264,51 @@ void handleCommands(char buffer[], int cSocket)
 
                         printf("%s \n", buffer);
                     }
-
-                    printf("ftp> ");
                     close(client);
                     exit(EXIT_FAILURE);
                 }
             }
             else if (strstr(command, "RETR") && strcmp(statusCode, "150") == 0)
             {
-                printf("DATA CHANNEL: RETR");
-                int channel = createSocket(true, S_DATAPORT, C_DATAPORT);
+                int pid = fork();
+                if (pid == 0)
+                {
+                    // data channel is ready
+                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int client = accept(channel, 0, 0);
+                    if (client < 0)
+                    {
+                        printf("Accept failed.\n");
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                    }
+                    close(channel);
+
+                    char *filename = request + 5;
+                    printf("%s\n", filename);
+
+                    char reader[BUFFER_SIZE];
+                    bzero(reader, BUFFER_SIZE);
+
+                    FILE *f;
+                    f = fopen(filename, "wb");
+
+                    int total = 0, ln;
+                    while ((ln = read(client, reader, BUFFER_SIZE)) > 0)
+                    {
+                        fwrite(reader, 1, BUFFER_SIZE, f);
+                        total += ln;
+                        if (ln < BUFFER_SIZE)
+                        {
+                            break;
+                        }
+                    }
+                    printf("Total data received for %s = %d bytes.\n", filename, total);
+                    fclose(f);
+
+                    close(client);
+                    exit(EXIT_FAILURE);
+                }
             }
             else if (strstr(command, "STOR") && strcmp(statusCode, "150") == 0)
             {
@@ -293,6 +329,7 @@ int main()
     {
         // take command input
         printf("ftp> ");
+
         fgets(buffer, BUFFER_SIZE, stdin);
 
         // remove trailing newline char from buffer, fgets doesn't do it

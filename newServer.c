@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
+#include <sys/stat.h>
 
 #include <unistd.h>
 #include <sys/time.h>
@@ -118,17 +119,70 @@ void performCWD(int client, char *buffer)
 void performLIST(int client)
 {
     send(client, responseMsg(150), BUFFER_SIZE, 0);
-    int pid = fork();
-    if (pid == 0)
+    usleep(1000);
+    int channel = createSocket(false, S_DATAPORT, C_PORT);
+
+    int count = 0;
+    struct dirent *dir;
+
+    DIR *d;
+    d = opendir(".");
+    if (d)
     {
-        usleep(1000); // temp
-        int channel = createSocket(false, S_DATAPORT, C_PORT);
-
-        char m[256] = "MSG IS HERE";
-        send(channel, m, BUFFER_SIZE, 0);
-
-        close(channel);
+        while ((dir = readdir(d)) != NULL)
+        {
+            if (count > 1)
+            {
+                char line[BUFFER_SIZE];
+                char type[] = {dir->d_type == 4 ? 'D' : 'F', '\0'};
+                strcpy(line, type);
+                strcat(line, "\t");
+                strcat(line, dir->d_name);
+                send(channel, line, BUFFER_SIZE, 0);
+            }
+            count++;
+        }
+        closedir(d);
     }
+
+    close(channel);
+}
+
+void performRETR(int client, char *filename)
+{
+    send(client, responseMsg(150), BUFFER_SIZE, 0);
+    usleep(1000);
+    int channel = createSocket(false, S_DATAPORT, C_PORT);
+
+    FILE *f;
+    f = fopen(filename, "rb");
+    if (f == NULL)
+    {
+        printf("Can't open %s\n", filename);
+    }
+
+    struct stat stat_buf;
+    int rc = stat(filename, &stat_buf);
+    int fsize = stat_buf.st_size;
+
+    char *databuff[fsize + 1];
+    fread(databuff, 1, sizeof(databuff), f);
+
+    int total = 0, bytesleft = fsize, ln;
+
+    while (total < fsize)
+    {
+        ln = send(channel, databuff + total, bytesleft, 0);
+        if (ln == -1)
+        {
+            break;
+        }
+        total += ln;
+        bytesleft -= ln;
+    }
+    bzero(databuff, sizeof(databuff));
+    fclose(f);
+    close(channel);
 }
 
 int createSocket(bool lstn, int sPort, int cPort)
@@ -193,7 +247,7 @@ int createSocket(bool lstn, int sPort, int cPort)
             exit(EXIT_FAILURE);
         }
 
-        printf("LISTENING on PORT %d\n", sPort);
+        printf("LISTENING on PORT %d...\n", sPort);
     }
 
     return cSocket;
@@ -214,11 +268,20 @@ void handleCommands(int client, char *buffer, int *login_state)
     }
     else if (strstr(command, "LIST"))
     {
-        printf("COMMAND: LIST\n");
         int pid = fork();
         if (pid == 0)
         {
             performLIST(client);
+            exit(EXIT_SUCCESS);
+        }
+    }
+    else if (strstr(command, "RETR"))
+    {
+        printf("IN RETR\n");
+        int pid = fork();
+        if (pid == 0)
+        {
+            performRETR(client, buffer + 5);
             exit(EXIT_SUCCESS);
         }
     }
@@ -282,9 +345,8 @@ int main()
                         FD_CLR(fd, &all_sockets);
                     }
 
-                    int login_state = -1;
+                    int login_state = -1; // todo
 
-                    printf("RECEIVED CMD: %s\n", buffer);
                     // when data is received
                     handleCommands(fd, buffer, &login_state);
                 }
