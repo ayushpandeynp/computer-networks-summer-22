@@ -13,14 +13,14 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 31 // Control Channel
-#define S_DATAPORT 30    // Data Channel
+#define S_CONTROLPORT 9007 // Control Channel (21 didn't)
+#define S_DATAPORT 900     //(NU)// Data Channel
 
-#define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
-#define C_DATAPORT 8086    // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_CONTROLPORT 8081 // NOT USED IN DATA CONNECTION // Client Control Channel PORT - this will be random
+#define C_DATAPORT 9090    // USED FOR DATA CHANNEL (CLIENT LISTEN)    // Client Data Channel PORT - this will update based on what we receive from PORT
 
 bool running = true;
-int login_state = 1;
+int login_state = -1;
 
 void portCommand()
 {
@@ -74,9 +74,7 @@ int createSocket(bool lstn, int sPort, int cPort)
     else
     {
         // bind the socket to our specified IP and port
-        if (bind(cSocket,
-                 (struct sockaddr *)&sAddr,
-                 sizeof(sAddr)) < 0)
+        if (bind(cSocket, (struct sockaddr *)&sAddr, sizeof(sAddr)) < 0)
         {
             printf("Socket bind failed. %d %d\n", cPort, sPort);
             exit(EXIT_FAILURE);
@@ -88,6 +86,8 @@ int createSocket(bool lstn, int sPort, int cPort)
             close(cSocket);
             exit(EXIT_FAILURE);
         }
+
+        printf("LISTENING on PORT %d...\n", sPort);
     }
 
     return cSocket;
@@ -174,31 +174,59 @@ void handleCommands(char buffer[], int cSocket)
     else
     {
         // send command to server
+        char rec_buffer[BUFFER_SIZE];
+        bzero(rec_buffer, BUFFER_SIZE);
+
         send(cSocket, buffer, BUFFER_SIZE, 0);
         bzero(buffer, BUFFER_SIZE);
-        recv(cSocket, buffer, BUFFER_SIZE, 0);
+        recv(cSocket, rec_buffer, BUFFER_SIZE, 0);
 
         // printing message from server
-        printf("%s\n", buffer);
+        printf("%s\n", rec_buffer);
 
         char statusCode[4];
-        strncpy(statusCode, buffer + 0, 3);
+        bzero(statusCode, 4);
+        strncpy(statusCode, rec_buffer, 3);
 
-        if (login_state == -1 && strstr(command, "USER") && strcmp(statusCode, "331"))
+        if (login_state == -1 && strstr(command, "USER"))
         {
-            login_state++;
+            recv(cSocket, buffer, BUFFER_SIZE, 0);
+            printf("%s\n", buffer);
+
+            if (strstr(buffer, "331"))
+            {
+                login_state++;
+            }
+            else
+            {
+                login_state--;
+            }
         }
-        else if (login_state == 0 && strstr(command, "PASS") && strcmp(statusCode, "230"))
+        if (login_state == 0 && strstr(command, "PASS"))
         {
-            login_state++;
+            recv(cSocket, buffer, BUFFER_SIZE, 0);
+            printf("%s\n", buffer);
+
+            if (strstr(buffer, "230"))
+            {
+                login_state++;
+            }
+            else
+            {
+                login_state--;
+            }
         }
         else if (login_state == 1)
         {
+            printf("sts: %s\n", statusCode);
             if (strstr(command, "LIST") && strcmp(statusCode, "150") == 0)
             {
+                printf("sds\n");
                 int pid = fork();
+                printf("sd %d\n", pid);
                 if (pid == 0)
                 {
+
                     // data channel is ready
                     int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
                     int client = accept(channel, 0, 0);
@@ -276,17 +304,18 @@ void handleCommands(char buffer[], int cSocket)
                     // data channel is ready
                     int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
                     int client = accept(channel, 0, 0);
+
                     if (client < 0)
                     {
                         printf("Accept failed.\n");
                         close(channel);
                         exit(EXIT_FAILURE);
                     }
-                    close(channel);
 
                     char *filename = request + 5;
                     FILE *f;
                     f = fopen(filename, "rb");
+
                     if (f == NULL)
                     {
                         printf("Can't open %s\n", filename);
@@ -299,13 +328,13 @@ void handleCommands(char buffer[], int cSocket)
 
                         printf("%s size is %d bytes.\n", filename, fsize);
 
-                        char *databuff[fsize + 1];
+                        char databuff[fsize + 1];
                         fread(databuff, 1, sizeof(databuff), f);
 
                         int total = 0, bytesleft = fsize, ln;
                         while (total < fsize)
                         {
-                            ln = send(channel, databuff + total, bytesleft, 0);
+                            ln = write(client, databuff + total, bytesleft);
                             if (ln == -1)
                             {
                                 break;
@@ -316,12 +345,13 @@ void handleCommands(char buffer[], int cSocket)
                         bzero(databuff, sizeof(databuff));
                         fclose(f);
                     }
-
+                    close(channel);
                     close(client);
                     exit(EXIT_FAILURE);
                 }
             }
         }
+        bzero(buffer, BUFFER_SIZE);
     }
     bzero(buffer, BUFFER_SIZE);
 }
@@ -335,7 +365,7 @@ int main()
     while (running)
     {
         // take command input
-        // printf("ftp> ");
+        printf("ftp> ");
 
         fgets(buffer, BUFFER_SIZE, stdin);
 
@@ -343,6 +373,7 @@ int main()
         buffer[strcspn(buffer, "\n")] = 0; // review 0 or '0'
 
         handleCommands(buffer, cSocket);
+        bzero(buffer, sizeof(buffer));
     }
 
     return 0;
