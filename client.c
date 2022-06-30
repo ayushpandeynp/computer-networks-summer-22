@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <strings.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
@@ -13,11 +13,11 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 41 // Control Channel
-#define S_DATAPORT 40   // Data Channel
+#define S_CONTROLPORT 21 // Control Channel
+#define S_DATAPORT 20    // Data Channel
 
 #define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
-#define C_DATAPORT 8083    // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_DATAPORT 8085    // Client Data Channel PORT - this will update based on what we receive from PORT
 
 bool running = true;
 int login_state = 1;
@@ -58,22 +58,16 @@ int createSocket(bool lstn, int sPort, int cPort)
         cAddr.sin_port = htons(cPort);
         cAddr.sin_addr.s_addr = INADDR_ANY;
 
-        // binding client port
-        if (bind(cSocket, (struct sockaddr *)&cAddr, sizeof(struct sockaddr_in)) != 0)
-        {
-            printf("Could not bind.\n");
-        }
-
         // connecting to server port
         int connection_status =
             connect(cSocket,
-                    (struct sockaddr *)&sAddr,
-                    sizeof(sAddr));
+                    (struct sockaddr *)&cAddr,
+                    sizeof(cAddr));
 
         // check for errors with the connection
         if (connection_status == -1)
         {
-            printf("There was an error making a connection to the remote socket. \n\n");
+            printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
             exit(EXIT_FAILURE);
         }
     }
@@ -84,10 +78,9 @@ int createSocket(bool lstn, int sPort, int cPort)
                  (struct sockaddr *)&sAddr,
                  sizeof(sAddr)) < 0)
         {
-            printf("Socket bind failed.\n");
+            printf("Socket bind failed. %d %d\n", cPort, sPort);
             exit(EXIT_FAILURE);
         }
-
         // after it is bound, we can listen for connections with queue length of 5
         if (listen(cSocket, 5) < 0)
         {
@@ -248,9 +241,7 @@ void handleCommands(char buffer[], int cSocket)
                 {
                     // data channel is ready
                     int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
-                    sleep(3);
-                    send(cSocket, "OK", BUFFER_SIZE, 0);
-
+                    printf("LISTENING on PORT %d...\n", C_DATAPORT);
                     int client = accept(channel, 0, 0);
                     if (client < 0)
                     {
@@ -273,7 +264,7 @@ void handleCommands(char buffer[], int cSocket)
                         printf("%s \n", buffer);
                     }
 
-                    printf("MMftp> ");
+                    printf("ftp> ");
                     close(client);
                     exit(EXIT_FAILURE);
                 }
@@ -294,7 +285,7 @@ void handleCommands(char buffer[], int cSocket)
 
 int main()
 {
-    int cSocket = createSocket(false, S_CONTROLPORT, 0);
+    int cSocket = createSocket(false, C_CONTROLPORT, S_CONTROLPORT);
 
     // accept command
     char buffer[BUFFER_SIZE];

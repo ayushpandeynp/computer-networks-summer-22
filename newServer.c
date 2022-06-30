@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include <strings.h>
+#include <string.h>
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
@@ -14,10 +14,10 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 41 // Control Channel
-#define S_DATAPORT 40    // Data Channel
+#define S_CONTROLPORT 21 // Control Channel
+#define S_DATAPORT 20    // Data Channel
 
-#define C_PORT 8083 // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_PORT 8085 // Client Data Channel PORT - this will update based on what we receive from PORT
 
 int createSocket(bool lstn, int sPort, int cPort);
 
@@ -118,24 +118,16 @@ void performCWD(int client, char *buffer)
 void performLIST(int client)
 {
     send(client, responseMsg(150), BUFFER_SIZE, 0);
-    char response[BUFFER_SIZE];
-    bzero(response, BUFFER_SIZE);
-    printf("WAITING FOR OK...\n");
-    recv(client, response, BUFFER_SIZE, 0);
-
-    if (strstr(response, "OK"))
+    int pid = fork();
+    if (pid == 0)
     {
-        int pid = fork();
-        if (pid == 0)
-        {
-            int channel = createSocket(false, C_PORT, S_DATAPORT);
+        usleep(1000); // temp
+        int channel = createSocket(false, S_DATAPORT, C_PORT);
 
-            char m[256] = "MSG IS HERE";
-            send(channel, m, BUFFER_SIZE, 0);
+        char m[256] = "MSG IS HERE";
+        send(channel, m, BUFFER_SIZE, 0);
 
-            close(channel);
-            printf("ftp> ");
-        }
+        close(channel);
     }
 }
 
@@ -170,22 +162,16 @@ int createSocket(bool lstn, int sPort, int cPort)
         cAddr.sin_port = htons(cPort);
         cAddr.sin_addr.s_addr = INADDR_ANY;
 
-        // binding client port
-        if (bind(cSocket, (struct sockaddr *)&cAddr, sizeof(struct sockaddr_in)) != 0)
-        {
-            printf("Could not bind\n");
-        }
-
         // connecting to server port
         int connection_status =
             connect(cSocket,
-                    (struct sockaddr *)&sAddr,
-                    sizeof(sAddr));
+                    (struct sockaddr *)&cAddr,
+                    sizeof(cAddr));
 
         // check for errors with the connection
         if (connection_status == -1)
         {
-            printf("There was an error making a connection to the remote socket. \n\n");
+            printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
             exit(EXIT_FAILURE);
         }
     }
@@ -196,10 +182,9 @@ int createSocket(bool lstn, int sPort, int cPort)
                  (struct sockaddr *)&sAddr,
                  sizeof(sAddr)) < 0)
         {
-            printf("Socket bind failed.\n");
+            printf("Socket bind failed. %d %d\n", cPort, sPort);
             exit(EXIT_FAILURE);
         }
-
         // after it is bound, we can listen for connections with queue length of 5
         if (listen(cSocket, 5) < 0)
         {
@@ -208,7 +193,7 @@ int createSocket(bool lstn, int sPort, int cPort)
             exit(EXIT_FAILURE);
         }
 
-        printf("Server is listening on PORT [%d]\n", sPort);
+        printf("LISTENING on PORT %d\n", sPort);
     }
 
     return cSocket;
@@ -245,7 +230,7 @@ void handleCommands(int client, char *buffer, int *login_state)
 
 int main()
 {
-    int sSocket = createSocket(true, S_CONTROLPORT, 0);
+    int sSocket = createSocket(true, S_CONTROLPORT, C_PORT);
 
     // DECLARE 2 fd sets (file descriptor sets : a collection of file descriptors)
     fd_set all_sockets;
