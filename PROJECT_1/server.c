@@ -15,16 +15,17 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 9007 // Control Channel (21 didn't work)
-#define S_DATAPORT 9090    // Data Channel
+#define S_CONTROLPORT 21 // Control Channel
+#define S_DATAPORT 20    // Data Channel
 
-#define C_PORT 9090 //(CLIENT LISTENING)// Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_PORT 9090 // Client Data Channel PORT - this will update based on what we receive from PORT
 
 int createSocket(bool lstn, int sPort, int cPort);
 
 int session[100];
 char check_username[256];
 int arr_size;
+
 // Object to load login details
 typedef struct
 {
@@ -54,7 +55,6 @@ int load(char *filename)
         char *ptr = strtok(buffer, delim);
         while (ptr != NULL)
         {
-            // printf("%s", ptr);
             if (x % 2 == 0)
             {
                 log->user = strdup(ptr);
@@ -456,7 +456,7 @@ int createSocket(bool lstn, int sPort, int cPort)
     return cSocket;
 }
 
-void handleCommands(int client, char *buffer, int *login_state)
+void handleCommands(int client, char *buffer)
 {
     char command[6];
     strncpy(command, buffer + 0, 5);
@@ -551,8 +551,7 @@ int main()
 
                     // add the newly accepted socket to the set of all sockets that we are watching
                     FD_SET(client_sd, &all_sockets);
-                    // TODO
-                    // add user_data to maintain login_state
+
                     session[fd] = -1;
                 }
                 else
@@ -571,10 +570,8 @@ int main()
                         FD_CLR(fd, &all_sockets);
                     }
 
-                    int login_state = -1; // todo
-
                     // when data is received
-                    handleCommands(fd, buffer, &login_state);
+                    handleCommands(fd, buffer);
                 }
             }
         }

@@ -13,18 +13,62 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 9007 // Control Channel (21 didn't)
-#define S_DATAPORT 900     //(NU)// Data Channel
+#define S_CONTROLPORT 21 // Control Channel (21 didn't)
+#define S_DATAPORT 20    // Data Channel
 
-#define C_CONTROLPORT 8081 // NOT USED IN DATA CONNECTION // Client Control Channel PORT - this will be random
-#define C_DATAPORT 9090    // USED FOR DATA CHANNEL (CLIENT LISTEN)    // Client Data Channel PORT - this will update based on what we receive from PORT
+#define C_CONTROLPORT 8081 // Client Control Channel PORT - this will be random
+#define C_DATAPORT 9090    // Client Data Channel PORT - this will update based on what we receive from PORT
 
 bool running = true;
 int login_state = -1;
 
+char *generatePortMsg(char *ip, int port)
+{
+    int p1 = port / 256;
+    int p2 = port % 256;
+
+    for (int i = 0; i < strlen(ip); i++)
+    {
+        if (ip[i] == '.')
+        {
+            ip[i] = ',';
+        }
+    }
+
+    char *msg = (char *)malloc(sizeof(char) * (strlen(ip) + 16));
+    sprintf(msg, "%s,%d,%d", ip, p1, p2);
+    msg = (char *)realloc(msg, sizeof(char) * (strlen(msg) + 1));
+    return msg;
+}
+
+int parsePortMsg(char *msg)
+{
+    int count = 0;
+    for (; *msg != '\0'; msg++)
+    {
+        if (*msg == ',')
+        {
+            count++;
+            if (count == 4)
+            {
+                msg++;
+                break;
+            }
+        }
+    }
+
+    char *token = strtok(msg, ",");
+    int p1 = atoi(token);
+    token = strtok(NULL, ",");
+    int p2 = atoi(token);
+    return p1 * 256 + p2;
+}
+
 void portCommand()
 {
-    // todo: send port data to server on control channel
+    char ip[] = "192.168.1.1";
+    printf("%s\n", generatePortMsg(ip, C_CONTROLPORT));
+    printf("%d\n", parsePortMsg(generatePortMsg(ip, C_CONTROLPORT)));
 }
 
 int createSocket(bool lstn, int sPort, int cPort)
@@ -356,7 +400,7 @@ void handleCommands(char buffer[], int cSocket)
     bzero(buffer, BUFFER_SIZE);
 }
 
-int main()
+int maina()
 {
     int cSocket = createSocket(false, C_CONTROLPORT, S_CONTROLPORT);
 
