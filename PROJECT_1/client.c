@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <stdbool.h>
 #include <dirent.h>
+#include <time.h>
 
 #include <sys/socket.h>
 #include <arpa/inet.h>
@@ -13,24 +14,14 @@
 
 #define BUFFER_SIZE 1024
 
-#define S_CONTROLPORT 9007 // Control Channel (21 didn't)
-#define S_DATAPORT 900  //(NU)// Data Channel
+#define S_CONTROLPORT 21 // Control Channel (21 didn't)
+#define S_DATAPORT 20    //(NU)// Data Channel
 
-#define C_CONTROLPORT 8081 //NOT USED IN DATA CONNECTION // Client Control Channel PORT - this will be random
-#define C_DATAPORT 9090 //USED FOR DATA CHANNEL (CLIENT LISTEN)    // Client Data Channel PORT - this will update based on what we receive from PORT
-
-//Global Variables
+// Global Variables
 bool running = true;
 int login_state = -1;
 
-//Function that handles PORT command
-void portCommand()
-{
-    // todo: send port data to server on control channel
-    printf("200 PORT command successful\n");
-}
-
-//Function that creates Socket & connections
+// Function that creates Socket & connections
 int createSocket(bool lstn, int sPort, int cPort)
 {
     // create a socket - Control Channel Socket
@@ -74,12 +65,11 @@ int createSocket(bool lstn, int sPort, int cPort)
             printf("There was an error making a connection to the remote socket. %d %d\n\n", cPort, sPort);
             exit(EXIT_FAILURE);
         }
-
     }
     else
     {
         // bind the socket to our specified IP and port
-        if (bind(cSocket,(struct sockaddr*)&sAddr,sizeof(sAddr)) < 0)
+        if (bind(cSocket, (struct sockaddr *)&sAddr, sizeof(sAddr)) < 0)
         {
             printf("Socket bind failed. %d %d\n", cPort, sPort);
             exit(EXIT_FAILURE);
@@ -91,14 +81,12 @@ int createSocket(bool lstn, int sPort, int cPort)
             close(cSocket);
             exit(EXIT_FAILURE);
         }
-
-        printf("LISTENING on PORT %d...\n", sPort);
     }
 
     return cSocket;
 }
 
-//Function that handles !PWD
+// Function that handles !PWD
 void performLocalPWD()
 {
     char *cwd;
@@ -114,7 +102,7 @@ void performLocalPWD()
     }
 }
 
-//Function that handles !CWD
+// Function that handles !CWD
 void performLocalCWD(char *buffer)
 {
     char *directory = buffer + 5;
@@ -128,7 +116,7 @@ void performLocalCWD(char *buffer)
     }
 }
 
-//Function that handles !LIST
+// Function that handles !LIST
 void performLocalLIST()
 {
     int count = 0;
@@ -151,8 +139,84 @@ void performLocalLIST()
     }
 }
 
-//Function that handles client input & server response
-void handleCommands(char buffer[], int cSocket)
+int generatePORT()
+{
+    srand(time(NULL));
+    int min = 3000;
+    int max = 8000;
+    return min + rand() % (max + 1 - min);
+}
+
+char *generatePortMsg(char *ip, int port)
+{
+    int p1 = port / 256;
+    int p2 = port % 256;
+
+    for (int i = 0; i < strlen(ip); i++)
+    {
+        if (ip[i] == '.')
+        {
+            ip[i] = ',';
+        }
+    }
+
+    char *msg = (char *)malloc(sizeof(char) * (strlen(ip) + 16));
+    sprintf(msg, "%s,%d,%d", ip, p1, p2);
+    msg = (char *)realloc(msg, sizeof(char) * (strlen(msg) + 1));
+    return msg;
+}
+
+char *sendToServer(int cSocket, char *buffer)
+{
+    // send command to server
+    char rec_buffer[BUFFER_SIZE];
+    bzero(rec_buffer, BUFFER_SIZE);
+
+    send(cSocket, buffer, BUFFER_SIZE, 0);
+    recv(cSocket, rec_buffer, BUFFER_SIZE, 0);
+
+    char *statusCode = (char *)malloc(sizeof(char) * 4);
+    strncpy(statusCode, rec_buffer, 3);
+
+    // printing message from server
+    printf("%s\n", rec_buffer);
+
+    return statusCode;
+}
+
+bool portCommand(int cSocket, int channel)
+{
+    struct sockaddr_in sin;
+    socklen_t len = sizeof(sin);
+
+    if (getsockname(channel, (struct sockaddr *)&sin, &len) == -1)
+    {
+        return false;
+    }
+    else
+    {
+        char *ip = inet_ntoa(sin.sin_addr);
+        int port = ntohs(sin.sin_port);
+
+        char buffer[BUFFER_SIZE];
+        bzero(buffer, BUFFER_SIZE);
+        sprintf(buffer, "PORT %s", generatePortMsg(ip, port));
+
+        char *statusCode = sendToServer(cSocket, buffer);
+
+        if (strstr(statusCode, "200"))
+        {
+            return true;
+        }
+        else
+        {
+            return false;
+        }
+    }
+}
+
+// Function that handles client input & server response
+void handleCommands(char *buffer, int cSocket)
 {
     char request[BUFFER_SIZE];
     strcpy(request, buffer);
@@ -180,49 +244,51 @@ void handleCommands(char buffer[], int cSocket)
     {
         performLocalLIST();
     }
-    // Control Channel Commands
     else
     {
-        // send command to server        
-        char rec_buffer[BUFFER_SIZE];
-        bzero(rec_buffer, BUFFER_SIZE); 
-
-        send(cSocket, buffer, BUFFER_SIZE, 0);
-        bzero(buffer, BUFFER_SIZE);
-        recv(cSocket, rec_buffer, BUFFER_SIZE, 0);
-
-        char statusCode[4];
-        bzero(statusCode, 4);
-        strncpy(statusCode, rec_buffer, 3);
-
-        if(strstr(statusCode, "150"))
-            portCommand();
-
-        // printing message from server
-        printf("%s\n", rec_buffer);
-       
-       //USER Authentication & login state management     
-        if (login_state == -1 && strstr(command, "USER") && strstr(statusCode, "331"))
+        // USER Authentication & login state management
+        if (login_state == -1 && strstr(command, "USER"))
         {
-            login_state++;
+            char *statusCode = sendToServer(cSocket, buffer);
+            if (strstr(statusCode, "331"))
+            {
+                login_state++;
+            }
         }
-        if (login_state == 0 && strstr(command, "PASS") && strstr(statusCode, "230"))
+        else if (login_state == 0 && strstr(command, "PASS"))
         {
-
-            login_state++;
-        
+            char *statusCode = sendToServer(cSocket, buffer);
+            if (strstr(statusCode, "230"))
+            {
+                login_state++;
+            }
         }
         else if (login_state == 1)
         {
-            //LIST Command
-            if (strstr(command, "LIST") && strcmp(statusCode, "150") == 0)
+            // LIST Command
+            if (strstr(command, "LIST"))
             {
                 int pid = fork();
                 if (pid == 0)
                 {
-                    
                     // data channel is ready
-                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int channel = createSocket(true, generatePORT(), S_DATAPORT);
+                    int portSuccess = portCommand(cSocket, channel);
+                    if (!portSuccess)
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
+                    char *statusCode = sendToServer(cSocket, buffer);
+                    if (!strstr(statusCode, "150"))
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
                     int client = accept(channel, 0, 0);
                     if (client < 0)
                     {
@@ -244,17 +310,35 @@ void handleCommands(char buffer[], int cSocket)
 
                         printf("%s \n", buffer);
                     }
+
+                    printf("ftp> ");
                     close(client);
                     exit(EXIT_FAILURE);
                 }
-            }//RETR Command
-            else if (strstr(command, "RETR") && strcmp(statusCode, "150") == 0)
+            } // RETR Command
+            else if (strstr(command, "RETR"))
             {
                 int pid = fork();
                 if (pid == 0)
                 {
                     // data channel is ready
-                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int channel = createSocket(true, generatePORT(), S_DATAPORT);
+                    int portSuccess = portCommand(cSocket, channel);
+                    if (!portSuccess)
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
+                    char *statusCode = sendToServer(cSocket, buffer);
+                    if (!strstr(statusCode, "150"))
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
                     int client = accept(channel, 0, 0);
                     if (client < 0)
                     {
@@ -288,20 +372,36 @@ void handleCommands(char buffer[], int cSocket)
 
                     bzero(reader, BUFFER_SIZE);
                     read(cSocket, reader, BUFFER_SIZE);
-                    printf("%s\n",reader);
+                    printf("%s\n", reader);
+                    printf("ftp> ");
                     exit(EXIT_FAILURE);
-
                 }
-            }//STOR command
-            else if (strstr(command, "STOR") && strcmp(statusCode, "150") == 0)
+            } // STOR command
+            else if (strstr(command, "STOR"))
             {
                 int pid = fork();
                 if (pid == 0)
                 {
                     // data channel is ready
-                    int channel = createSocket(true, C_DATAPORT, S_DATAPORT);
+                    int channel = createSocket(true, generatePORT(), S_DATAPORT);
+                    int portSuccess = portCommand(cSocket, channel);
+                    if (!portSuccess)
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
+                    char *statusCode = sendToServer(cSocket, buffer);
+                    if (!strstr(statusCode, "150"))
+                    {
+                        close(channel);
+                        exit(EXIT_FAILURE);
+                        return;
+                    }
+
                     int client = accept(channel, 0, 0);
-                    
+
                     if (client < 0)
                     {
                         printf("Accept failed.\n");
@@ -312,7 +412,7 @@ void handleCommands(char buffer[], int cSocket)
                     char *filename = request + 5;
                     FILE *f;
                     f = fopen(filename, "rb");
-                    
+
                     if (f == NULL)
                     {
                         printf("Can't open %s\n", filename);
@@ -329,9 +429,10 @@ void handleCommands(char buffer[], int cSocket)
                         int total = 0, bytesleft = fsize, ln;
                         while (total < fsize)
                         {
-                            ln = write(client,databuff + total,bytesleft);
+                            ln = write(client, databuff + total, bytesleft);
                             if (ln == -1)
                             {
+                                printf("Error writing to socket.\n");
                                 break;
                             }
                             total += ln;
@@ -345,19 +446,28 @@ void handleCommands(char buffer[], int cSocket)
 
                     bzero(buffer, BUFFER_SIZE);
                     read(cSocket, buffer, BUFFER_SIZE);
-                    printf("%s\n",buffer);
+                    printf("%s\n", buffer);
+                    printf("ftp> ");
                     exit(EXIT_FAILURE);
                 }
             }
+            else
+            {
+                sendToServer(cSocket, buffer);
+            }
+        }
+        else
+        {
+            sendToServer(cSocket, buffer);
         }
     }
     bzero(buffer, BUFFER_SIZE);
 }
 
-//Main Function
+// Main Function
 int main()
 {
-    int cSocket = createSocket(false, C_CONTROLPORT, S_CONTROLPORT);
+    int cSocket = createSocket(false, generatePORT(), S_CONTROLPORT);
 
     // accept command
     char buffer[BUFFER_SIZE];

@@ -1,6 +1,6 @@
-test.c
 .vscode
 **/.DS_Store
-client
-server
-test
+PROJECT_1/test.c
+PROJECT_1/client
+PROJECT_1/server
+PROJECT_1/test
